@@ -52,12 +52,12 @@ end
 Rt = t([1,end]);
 
 %% drift correction
-T = numel(unique(id))*diff(Rx)*diff(Ry)/3e6; % heuristic for optimal length of time window
-T = min([T, diff(Rt)/2, 3600]); % need at least two time windows
+T = numel(unique(id))*diff(Rx)*diff(Ry)/3e-12; % heuristic for optimal length of time window
+T = min([T, diff(Rt)/2, 3600]); % need at least two time windows and at most one hour per time window
 T = max([T, 600]); % but at least 10 minutes long
 sxy = 2e-9;
 sxyz = 5e-9;
-use_gpu = true;
+use_gpu = false; % only set to true if you have a GPU with sufficient RAM available
 
 % switch for 2D/3D
 is3D = diff(Rz) > 1e-9;
@@ -142,7 +142,7 @@ stat.drift = drift;
 stat.combined = c;
 stat.cfr = cfr;
 stat.t = t;
-stat.id = id;
+stat.id = double(id); % is int32 and if combined with double, Matlab unfortunately casts to int32 instead of using double
 stat.fbg = fbg;
 stat.is3D = is3D;
 stat.frc = frc;

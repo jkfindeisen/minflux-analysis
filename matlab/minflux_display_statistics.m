@@ -192,7 +192,7 @@ for i = 2 : size(d, 2)
     plot(d(:, 1), d(:, i)/1e-9, 'DisplayName', labels{i-1});
 end
 decorate('time (s)', 'Est. drift (nm)');
-
+legend('x', 'y', 'z', 'Location', 'best');
 
 end
 
