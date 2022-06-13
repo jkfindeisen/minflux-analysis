@@ -1,4 +1,4 @@
-function [h, xi, yi, zi, ix, iy, iz] = render_xyz(x, y, z, sx, sy, sz, Rx, Ry, Rz, options)
+function [h, xi, yi, zi, ix, iy, iz, m] = render_xyz(x, y, z, sx, sy, sz, Rx, Ry, Rz, options)
 % Makes a 3D histogram
 
 assert(nargin >= 9);
@@ -23,20 +23,16 @@ ix = round(px);
 iy = round(py);
 iz = round(pz);
 
-% remove those outside
-m = ix > 0 & ix <= Nx & iy > 0 & iy <= Ny & iz > 0 & iz <= Nz;
-px = px(m);
-py = py(m);
-pz = pz(m);
-ix = ix(m);
-iy = iy(m);
-iz = iz(m);
-
 % switch according to type
-
 switch options.type
     case 'histogram'
         % just a histogram
+        
+        % remove those outside
+        m = ix > 0 & ix <= Nx & iy > 0 & iy <= Ny & iz > 0 & iz <= Nz;
+        ix = ix(m);
+        iy = iy(m);
+        iz = iz(m);
         
         % fill in histogram (or use accumarray)
         for i = 1 : numel(ix)
@@ -49,9 +45,13 @@ switch options.type
     case 'fixed_gaussian'
         % gaussian with subpixel accuracy
         
-        wx = options.fwhm / sx;
-        wy = options.fwhm / sy;
-        wz = options.fwhm / sz;
+        if numel(options.fwhm) == 1
+            options.fwhm = options.fwhm * [1,1,1];
+        end        
+        
+        wx = options.fwhm(1) / sx;
+        wy = options.fwhm(2) / sy;
+        wz = options.fwhm(3) / sz;
         L = ceil(2*max([wx, wy, wz]));
         % small grid
         g = -L:L;
@@ -65,7 +65,6 @@ switch options.type
         ix = ix(m);
         iy = iy(m);
         iz = iz(m);
-        
         
         for i = 1 : numel(ix)
             xi = ix(i);

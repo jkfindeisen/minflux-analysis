@@ -20,21 +20,15 @@ py = (y - Ry(1)) / sy;
 ix = round(px);
 iy = round(py);
 
-% remove those outside
-m = ix > 0 & ix <= Nx & iy > 0 & iy <= Ny;
-px = px(m);
-py = py(m);
-ix = ix(m);
-iy = iy(m);
-
-% get linear output index
-idx = ix + (iy-1)*Nx;
-
 % switch according to type
-
 switch options.type
     case 'histogram'
         % just a histogram
+        
+        % remove those outside
+        m = ix > 0 & ix <= Nx & iy > 0 & iy <= Ny;
+        ix = ix(m);
+        iy = iy(m);
         
         % fill in histogram (or use accumarray)
         for i = 1 : numel(ix)
@@ -46,14 +40,18 @@ switch options.type
     case 'fixed_gaussian'
         % gaussian with subpixel accuracy
         
-        wx = options.fwhm / sx;
-        wy = options.fwhm / sy;
+        if numel(options.fwhm) == 1
+            options.fwhm = options.fwhm * [1,1];
+        end
+        
+        wx = options.fwhm(1) / sx;
+        wy = options.fwhm(2) / sy;
         L = ceil(2*max(wx, wy));
         % small grid
         g = -L:L;
         [xk, yk] = ndgrid(g, g);
         
-        % remove close at border
+        % remove close to border and outside
         m = ix >= L+1 & ix <= Nx-L-1 & iy >= L+1 & iy <= Ny-L-1;
         px = px(m);
         py = py(m);
@@ -69,12 +67,14 @@ switch options.type
             gy = yi + g;
             k = exp(-4*log(2)*((xk-dx).^2/wx^2+(yk-dy).^2/wy^2));
             h(gx, gy) = h(gx, gy) + k;
-%             h(gx, gy) = max(h(gx, gy), k); % this would 
         end
         
     otherwise
         error('unknown type');
 end
+
+% get linear output index
+idx = ix + (iy-1)*Nx;
 
 % define output xy grid
 xi = Rx(1) + (1:Nx) * sx + sx / 2;

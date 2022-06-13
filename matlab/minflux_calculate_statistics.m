@@ -8,13 +8,14 @@ assert(nargin == 1);
 %% extract all relevant information from the minflux data structure, remove all invalid entries
 valid = minflux.vld(:);
 stat.fraction_valid = mean(valid);
-efc = minflux.itr.efc;
-efo = minflux.itr.efo;
-fbg = minflux.itr.fbg(:, end);
-pos = squeeze(minflux.itr.loc(:, end, :));
-t = minflux.tim(:);
-t = t - t(1); % w.r.t. start at zero
-id = minflux.tid(:);
+efc = minflux.itr.efc(valid, :);
+efo = minflux.itr.efo(valid, :);
+fbg = minflux.itr.fbg(valid, end);
+pos = squeeze(minflux.itr.loc(valid, end, :));
+t = minflux.tim(valid);
+t = t(:) - t(1); % w.r.t. start at zero
+id = minflux.tid(valid);
+id = id(:); % to have everything Nx1
 
 %% center frequency ratio
 

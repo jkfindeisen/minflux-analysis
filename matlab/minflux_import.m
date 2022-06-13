@@ -1,12 +1,24 @@
-function minflux_import(file, output_folder)
+function ROI = minflux_import(file, output_folder, ROI)
 % Reads an exported Minflux data file from AI and
 %   - exports the valid localizations into a csv file
 %   - renders the data set in 2/3D as histogram/Gaussian
 %   - exports as tiff image
 %   - estimates a few interesting characteristics
 %
-% output_folder - where to put the imported data (if not given takes the
-% folder of the input file)
+% Input parameters
+%   file    ".mat" file with exported Minflux localizations from an AI
+%           Minflux microscope measurement
+%   output_folder   where to put the imported data (if not given or empty
+%                   takes the folder in which the input file resides
+%   ROI     a 2x3 matrix with the first row xyz coordinates of the upper,
+%           left corner of the ROI and the second row the lower, right
+%           corner
+%
+% Notes
+%
+% - If you have multiple channels and you need renderings of the same ROI,
+%   just call minflux_import without a ROI on one of them, store the
+%   returned ROI and use it (as input parameter) for all other channels.
 
 close all;
 
@@ -14,17 +26,21 @@ if ~exist('drift_correction_time_windows_2D.m', 'file')
     initialize();
 end
 
-%% default parameters
+%% input parameter checking
 assert(nargin >= 1, 'Please provide a file path to a *.mat file of exported localizations.');
 fprintf('work on file %s\n', file);
 [file_path , base_name] = fileparts(file);
-if nargin < 2
+if nargin < 2 || isempty(output_folder)
     output_folder = file_path; % use input file folder as output folder if no output folder is given explicitely
 end
 if ~endsWith(output_folder, filesep)
     output_folder = [output_folder, filesep]; % add slash if needed
 end
+if nargin < 3 || isempty(ROI)
+    ROI = [];
+end
 
+%% parameters to adjust the script (customize here)
 correct_z_position = true;      % AI Minflux micrsocopes export z positions wrongly (beginning of 2022), if true, corrects for that
 correct_z_position_factor = 0.7;
 
@@ -81,14 +97,16 @@ sxyz = 2e-9; % pixel size for renderings (m)
 if export_renderings
     fprintf('export rendered files to tiff/obf/ome-tiff (can take a while)\n');
     
-    % get reasonable ranges
-    a = 0.01;
-    R = quantile(stat.pos, [a, 1-a]);
+    % get reasonable ranges if ROI not given
+    if isempty(ROI)
+        a = 0.01;
+        ROI = quantile(stat.pos, [a, 1-a]);
+    end
     
     % loop over localizations, drift-corrected localizations, combined
-    h1 = render(stat.pos, R, stat.is3D, sxyz, gaussian_render_fwhm);
-    h2 = render(stat.dpos, R, stat.is3D, sxyz, gaussian_render_fwhm);
-    h3 = render(stat.combined.pos, R, stat.is3D, sxyz, gaussian_render_fwhm);
+    h1 = render(stat.pos, ROI, stat.is3D, sxyz, gaussian_render_fwhm);
+    h2 = render(stat.dpos, ROI, stat.is3D, sxyz, gaussian_render_fwhm);
+    h3 = render(stat.combined.pos, ROI, stat.is3D, sxyz, gaussian_render_fwhm);
     
     % and write out
     path = [output_folder, base_name];
