@@ -176,9 +176,14 @@ try
     meta.setPixelsPhysicalSizeX(pixelSize, 0);
     meta.setPixelsPhysicalSizeY(pixelSize, 0);
     meta.setPixelsPhysicalSizeZ(pixelSize, 0);
-    name = [name, '.histogram'];
+    nameOriginal = name;
+    name = [nameOriginal, '.histogram'];
     bfsave(h1, [path, name, '.ome.tiff'], 'metadata', meta);
-    name = [name, '.gaussian-rendering'];
+    meta = createMinimalOMEXMLMetadata(h2); % default dimension order XYZCT
+    meta.setPixelsPhysicalSizeX(pixelSize, 0);
+    meta.setPixelsPhysicalSizeY(pixelSize, 0);
+    meta.setPixelsPhysicalSizeZ(pixelSize, 0);
+    name = [nameOriginal, '.gaussian-rendering'];
     bfsave(h2, [path, name, '.ome.tiff'], 'metadata', meta);
 catch ex
     % could not write ome tiff
