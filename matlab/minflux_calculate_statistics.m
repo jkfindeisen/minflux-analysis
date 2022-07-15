@@ -51,11 +51,11 @@ if diff(Rz) < Rmin && diff(Rz) > 1e-9 % only if 3D
     Rz = Rz + (Rmin - diff(Rz))/2*[-1,1];
 end
 Rt = t([1,end]);
-
+Tmin = 400;
 %% drift correction
 T = numel(unique(id))*diff(Rx)*diff(Ry)/3e-12; % heuristic for optimal length of time window
 T = min([T, diff(Rt)/2, 3600]); % need at least two time windows and at most one hour per time window
-T = max([T, 600]); % but at least 10 minutes long
+T = max([T, Tmin]); % but at least 10 minutes long
 sxy = 2e-9;
 sxyz = 5e-9;
 use_gpu = false; % only set to true if you have a GPU with sufficient RAM available

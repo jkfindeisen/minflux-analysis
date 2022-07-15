@@ -29,7 +29,7 @@ end
 %% input parameter checking
 global defaultPath
 if nargin < 1
-    if isempty(defaultPath) || defaultPath == 0
+    if isempty(defaultPath) || all(defaultPath == 0)
         [file, path] = uigetfile();
     else
         [file, path] = uigetfile(defaultPath);
