@@ -27,12 +27,27 @@ if ~exist('drift_correction_time_windows_2D.m', 'file')
 end
 
 %% input parameter checking
-assert(nargin >= 1, 'Please provide a file path to a *.mat file of exported localizations.');
+global defaultPath
+if nargin < 1
+    if isempty(defaultPath) || all(defaultPath == 0)
+        [file, path] = uigetfile();
+    else
+        [file, path] = uigetfile(defaultPath);
+    end
+    if file == 0
+        return
+    end
+    defaultPath = path;
+    file = fullfile(path, file);
+end
+
+
 fprintf('work on file %s\n', file);
 [file_path , base_name] = fileparts(file);
-if nargin < 2 || isempty(output_folder)
-    output_folder = file_path; % use input file folder as output folder if no output folder is given explicitely
+if nargin < 2
+   output_folder =uigetdir(file_path, "Specify output folder");
 end
+
 if ~endsWith(output_folder, filesep)
     output_folder = [output_folder, filesep]; % add slash if needed
 end
@@ -122,6 +137,7 @@ end
 end
 
 function export(h, name, is3D, path, sxyz)
+asOme = 0;
 % export a set of rendering (histogram, gaussian renderings) to normal tiff
 % (if 2D), to obf (if specmy available), to ometiff (if ome available)
 
@@ -166,25 +182,31 @@ catch ex
     fprintf('%s - %s\n', ex.identifier, ex.message);
 end
 
-% save as ometiff
-try
-    h1 = h{1};
-    h2 = h{2};
-    bfCheckJavaPath();
-    pixelSize = ome.units.quantity.Length(java.lang.Double(sxyz / 1e-6), ome.units.UNITS.MICROMETER);
-    meta = createMinimalOMEXMLMetadata(h1); % default dimension order XYZCT
-    meta.setPixelsPhysicalSizeX(pixelSize, 0);
-    meta.setPixelsPhysicalSizeY(pixelSize, 0);
-    meta.setPixelsPhysicalSizeZ(pixelSize, 0);
-    name = [name, '.histogram'];
-    bfsave(h1, [path, name, '.ome.tiff'], 'metadata', meta);
-    name = [name, '.gaussian-rendering'];
-    bfsave(h2, [path, name, '.ome.tiff'], 'metadata', meta);
-catch ex
-    % could not write ome tiff
-    fprintf('%s - %s\n', ex.identifier, ex.message);
+if asOme
+    % save as ometiff
+    try
+        h1 = h{1};
+        h2 = h{2};
+        bfCheckJavaPath();
+        pixelSize = ome.units.quantity.Length(java.lang.Double(sxyz / 1e-6), ome.units.UNITS.MICROMETER);
+        meta = createMinimalOMEXMLMetadata(h1); % default dimension order XYZCT
+        meta.setPixelsPhysicalSizeX(pixelSize, 0);
+        meta.setPixelsPhysicalSizeY(pixelSize, 0);
+        meta.setPixelsPhysicalSizeZ(pixelSize, 0);
+        nameOriginal = name;
+        name = [nameOriginal, '.histogram'];
+        bfsave(h1, [path, name, '.ome.tiff'], 'metadata', meta);
+        meta = createMinimalOMEXMLMetadata(h2); % default dimension order XYZCT
+        meta.setPixelsPhysicalSizeX(pixelSize, 0);
+        meta.setPixelsPhysicalSizeY(pixelSize, 0);
+        meta.setPixelsPhysicalSizeZ(pixelSize, 0);
+        name = [nameOriginal, '.gaussian-rendering'];
+        bfsave(h2, [path, name, '.ome.tiff'], 'metadata', meta);
+    catch ex
+        % could not write ome tiff
+        fprintf('%s - %s\n', ex.identifier, ex.message);
+    end
 end
-
 end
 
 function h = render(pos, R, is3D, sxyz, gaussian_render_fwhm)

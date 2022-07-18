@@ -53,9 +53,10 @@ Field itr is a struct with fields:
 - lcx  localization position rel. to beam (m) in x
 - lcy  .. in y
 - lcz  .. in z
-- lnc  ?
+- lnc  loc non corrected 
 - loc  absolute localization precision in x,y,z (m), NaN means
-  no localization possible/done
+  no localization possible/done. Localization corrected with beam line correaction (for newer system)
+  If lnc =/= loc then data has been corrected. 
 - sta  debug parameter (state, number that encodes the abort
   criteria)
 - tic  timestamp of every iteration / FPGA ticks 40MHz = (25ns)
