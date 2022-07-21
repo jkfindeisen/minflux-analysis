@@ -73,3 +73,11 @@ Notes:
 - eco, ecc, efo, efc may be background corrected (subtracted fbg)
   but there are hints that they might not be fully corrected
   (fbg determined wrongly)
+
+
+### Beads for beam adjustment
+
+You access the bead positions via the Zarr archive in the data directory (usually C:\Data\<data uid>\zarr) 
+while the measurement is open in Imspector. Within the archive structure, their localization data 
+is stored at /grd/mbm/R<nn>.
+

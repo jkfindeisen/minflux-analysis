@@ -1,9 +1,12 @@
 import zarr
 import os
 import numpy as np
+import matplotlib.pyplot as plt
+plt
 from tkinter.filedialog import askdirectory
 zarr_directory = askdirectory(initialdir='C:/Data')
-
+import napari
+napari.view_image(imga).
 beads = zarr.open(store = zarr_directory, mode='r')
 
 for R in beads['grd/mbm']:
