@@ -95,7 +95,6 @@ class MfxData:
         pos_array = np.concatenate(pos_array)
 
 
-        # TODO: if >=3 valid beads can also compute rotation matrix using Kabsch_algorithm scipy.spatial.transform.Rotation.align_vectors
         # Use centroids compute transform reduces std position for each bead
 
         centroids = np.mean(pos_array, axis=1)
