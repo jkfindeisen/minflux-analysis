@@ -3,25 +3,25 @@ Utility class to read MinFluX data from Abberior microscopes
 specpy class is from Imspector installation (C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\)
 Author: Antonio Politi, MPINAT, 07.2022
 """
-
+# TODO save as mat file for clustering (this should move to python also)
 
 import zarr
 import os
 from specpy import *
 import numpy as np
-from scipy.interpolate import *
-from scipy.linalg import norm
 from scipy.spatial import transform
 from scipy.interpolate import interp1d
-
+import math
 from matplotlib import pyplot as plt
+
+
 class MfxData:
-    MAX_TDIFF_REF = 10 # time difference between final record of ref (beads) and mfx recording in sec.
+    MAX_TDIFF_REF = 10  # time difference between final record of ref (beads) and mfx recording in sec.
     # mfx recording is cropped accordingly
     ref_all = {}
     mfx_all = {}
-    valid_ref_beads = {}   # Beads recording that fulfill minimal requirements
-    maxtime_ref_beads = {} # Consensus max time between reference beads recording
+    valid_ref_beads = {}  # Beads recording that fulfill minimal requirements
+    maxtime_ref_beads = {}  # Consensus max time between reference beads recording
     TRANS = 'translate'
     ROT = 'rotate'
 
@@ -33,7 +33,7 @@ class MfxData:
         self.filename = os.path.splitext(os.path.basename(self.msrfile))[0]
         self.outdir = os.path.join(self.filepath, self.filename)
 
-    def zarr_export(self, outdir = None, force = False):
+    def zarr_export(self, outdir=None, force=False):
         """
         Export mfx msr file to zarr files if data does not exist yet.
         :param outdir: path string. If None data is written to directory of msr file/msr_filename
@@ -53,14 +53,14 @@ class MfxData:
             else:
                 afile.unpack(mf['sid'], self.zarrdir[mf['label']])
 
-    def zarr_import(self, force = False):
+    def zarr_import(self, force=False):
         """
         Import zarr files located in self.zarrdir if no data has been loaded yet
         :param force: force import
         """
         if len(self.ref_all) == 0 or force:
             for label, adir in self.zarrdir.items():
-                zarr_data = zarr.open(store = os.path.join(adir, 'zarr'), mode='r')
+                zarr_data = zarr.open(store=os.path.join(adir, 'zarr'), mode='r')
                 self.ref_all[label] = zarr_data.grd.mbm
                 self.mfx_all[label] = zarr_data.mfx
 
@@ -111,51 +111,25 @@ class MfxData:
             time_std_vector.append(np.std(time_stack, axis=1))
             pos_array.append(np.stack([self.ref_all[label][b]['pos'][:n_el] for b in beads_id], axis=1))
 
+        # TODO This is not consistent in case there is a variation in order of label and idx
         for i in range(1, len(time_vector)):
-            time_vector[i] = time_vector[i] + time_vector[i-1][-1]
+            time_vector[i] = time_vector[i] + time_vector[i - 1][-1]
 
         time_vector = np.concatenate(time_vector)
         time_std_vector = np.concatenate(time_std_vector)
         pos_array = np.concatenate(pos_array)
         return [time_vector, pos_array, time_std_vector]
 
-    def show_ref_transform(self, translate=None, rotate=None):
+    def compute_ref_transform_error(self, pos_array):
+        # Compute error in bead position now just std
 
-        if translate is None or rotate is None:
-            transform = self.compute_ref_transform()
-            translate=transform[self.TRANS]
-            rotate=transform[self.ROT]
-
-        [time_vector, pos_array, time_std_vector] = self.get_ref_vector()
-
-        # Plot transform for current points
-        dpos_array = np.reshape(np.repeat(translate(time_vector), pos_array.shape[1], axis=1), pos_array.shape, order='F')
-        pos_array_translate = pos_array - dpos_array
-        pos_array_translate_rotate = pos_array_translate
-        for idx in range(pos_array_translate_rotate.shape[0]):
-            pos_array_translate_rotate[idx] = rotate(time_vector[idx]).apply(pos_array_translate[idx])
-        fig, axs = plt.subplots(3, 2, sharex=True, sharey=True)
-        labels = ['x_pos', 'y_pos', 'z_pos']
-        for ax_idx, ax  in enumerate(axs):
-            # Loop through the reference objects
-            for idx in range(pos_array.shape[1]):
-                ax[0].plot(time_vector, pos_array[:, idx, ax_idx] - pos_array[0, idx, ax_idx])
-                ax[1].plot(time_vector, pos_array_translate_rotate[:, idx, ax_idx] -
-                           np.mean(pos_array_translate_rotate[0, idx, ax_idx]),
-                           ls="--", label=self.valid_ref_beads['P1'][idx])
-
-            ax[1].legend()
-
-            ax[0].set_ylabel(labels[ax_idx])
-
-        axs[0][0].set_title('Unregistered')
-        axs[0][1].set_title('Registered translate + rotate, interpolated')
-        plt.show()
+        std = [np.std(pos_array[:, :, ax], axis=0) for ax in [0, 1, 2]]
+        return {'ste': np.mean(np.linalg.norm(std, axis=1)) / math.sqrt(len(std)),
+                'std': np.mean(np.linalg.norm(std, axis=1))}
 
     def compute_ref_transform(self):
         # Get vector of positions and time
         [time_vector, pos_array, time_std_vector] = self.get_ref_vector()
-
 
         # Translation using the centroids
         centroids = np.mean(pos_array, axis=1)
@@ -178,22 +152,91 @@ class MfxData:
         out_dict[self.ROT] = rotate
         return out_dict
 
+    def apply_ref_transform(self, translate, rotate, pos_array, time_vector):
+        # Translate
+        pos_array_reg = pos_array - translate(time_vector)
+        # Rotate
+        for idx in range(pos_array_reg.shape[0]):
+            pos_array_reg[idx] = rotate(time_vector[idx]).apply(pos_array_reg[idx])
+        return pos_array_reg
+
+    def show_ref_transform(self, translate=None, rotate=None):
+
+        if translate is None or rotate is None:
+            transform = self.compute_ref_transform()
+            translate = transform[self.TRANS]
+            rotate = transform[self.ROT]
+
+        [time_vector, pos_array, time_std_vector] = self.get_ref_vector()
+        pos_array_translate_rotate = np.zeros_like(pos_array) # this is important otherwise pas by reference
+        for idx in range(0, pos_array.shape[1]):
+            pos_array_translate_rotate[:, idx] = self.apply_ref_transform(translate, rotate, pos_array[:, idx],
+                                                                          time_vector)
+
+        fig, axs = plt.subplots(3, 2, sharex=True, sharey=True)
+        labels = ['x_pos', 'y_pos', 'z_pos']
+        for ax_idx, ax in enumerate(axs):
+            # Loop through the reference objects
+            for idx in range(pos_array.shape[1]):
+                ax[0].plot(time_vector, pos_array[:, idx, ax_idx] - pos_array[0, idx, ax_idx])
+                ax[1].plot(time_vector, pos_array_translate_rotate[:, idx, ax_idx] -
+                           np.mean(pos_array_translate_rotate[0, idx, ax_idx]),
+                           ls="--", label=self.valid_ref_beads['P1'][idx])
+
+            ax[1].legend()
+            ax[0].set_ylabel(labels[ax_idx])
+        ref_error = self.compute_ref_transform_error(pos_array)
+        ref_error_translate_rotate = self.compute_ref_transform_error(pos_array_translate_rotate)
+
+        axs[0][0].set_title('Unregistered, std (nm) %.2f, se (nm) %.2f' % (ref_error['std'] * math.pow(10, 9),
+                                                                           ref_error['ste'] * math.pow(10, 9)))
+        axs[0][1].set_title('Reg. translate + rotate, std (nm) %.2f, se (nm) %.2f' % (
+            ref_error_translate_rotate['std'] * math.pow(10, 9),
+            ref_error_translate_rotate['ste'] * math.pow(10, 9)))
+        plt.show()
+
     def align_to_ref(self):
         #
 
-        valid_ref_beads = self.get_valid_ref()
+        transform = self.compute_ref_transform()
+        lnc = {}
+        tim = {}
+        tid = {}
+        loc = {}
+        loc_reg = {}
+        keys = list(self.mfx_all)
+        for label, obj in self.mfx_all.items():
+            # Trim on valid tracks
+            lnc[label] = obj['itr']['lnc'][obj['vld']]
+            loc[label] = obj['itr']['loc'][obj['vld']]
+            tim[label] = obj['tim'][obj['vld']]
+            tid[label] = obj['tid'][obj['vld']]
 
-        zarr_data = zarr.open(store = os.path.join(self.zarrdir['P1'], 'zarr'), mode='r')
-        ref = zarr_data.grd.mbm
-        mfx = zarr_data.mfx
+            # further trim for time ref_beads
+            tim_trim = tim[label] < self.maxtime_ref_beads[label]
+            lnc[label] = lnc[label][tim_trim]
+            loc[label] = loc[label][tim_trim]
+            tim[label] = tim[label][tim_trim]
+            tid[label] = tid[label][tim_trim]
+            # Keep only last iteration
+            lnc[label] = lnc[label][:, -1]
+            loc[label] = loc[label][:, -1]
 
+        # Add time
+        addtime = 0
+        for idx in range(1, len(keys)):
+            addtime += self.maxtime_ref_beads[keys[idx - 1]]
+            tim[keys[idx]] = tim[keys[idx]] + addtime
 
-
+        for label in self.mfx_all:
+            loc_reg[label] = self.apply_ref_transform(transform[self.TRANS], transform[self.ROT], lnc[label],
+                                                      tim[label])
+        return [tim, lnc, loc, loc_reg]
 
 
 if __name__ == "__main__":
     mfx = MfxData("C:/Users/apoliti/Desktop/mfluxtest/220309_VGlut_paint_2nM_3DMINFLUX_16p_PH0_6_05b.msr")
     mfx.zarr_export()
-    print(mfx.get_valid_ref())
+    outtrans = mfx.align_to_ref()s
     transform = mfx.compute_ref_transform()
     mfx.show_ref_transform(transform[mfx.TRANS], transform[mfx.ROT])
