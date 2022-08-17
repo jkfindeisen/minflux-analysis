@@ -4,7 +4,7 @@ specpy class is from Imspector installation (C:\Imspector\Versions\16.3.15620-m2
 Author: Antonio Politi, MPINAT, 07.2022
 """
 # TODO save as mat file for clustering (this should move to python also)
-
+import scipy.io
 import zarr
 import os
 from specpy import *
@@ -79,7 +79,7 @@ class MfxData:
         # check that zarr files exist and eventually export
         for label, adir in self.zarrdir.items():
             if not os.path.exists(adir):
-                self.zarr_export(self.zarrdir, self.msrfile)
+                self.zarr_export()
 
         if len(self.ref_all) == 0 or len(self.mfx_all) == 0 or force:
             for label, adir in self.zarrdir.items():
@@ -183,8 +183,8 @@ class MfxData:
         rot_vec = transform.Rotation.from_rotvec([r.as_rotvec() for r in rot])
         rotate = transform.Slerp(time_vector, rot_vec)
 
-        out_dict = {self.TRANS: translate, self.ROT: rotate}
-        return out_dict
+        out_transform = {self.TRANS: translate, self.ROT: rotate}
+        return out_transform
 
     def apply_ref_translate(self, translate, pos_array, time_vector):
         return pos_array - translate(time_vector)
@@ -201,7 +201,6 @@ class MfxData:
         return pos_array_reg
 
     def show_ref_transform(self, translate, rotate):
-
         [time_vector, pos_array, time_std_vector] = self.get_ref()
         pos_array_translate_rotate = np.zeros_like(pos_array) # this is important otherwise pas by reference
         for idx in range(0, pos_array.shape[1]):
@@ -231,46 +230,51 @@ class MfxData:
         plt.show()
 
     def align_to_ref(self):
-        #
-
-        transform = self.get_ref_transform()
-        lnc = {}
-        tim = {}
-        tid = {}
-        loc = {}
-        loc_reg = {}
+        register = self.get_ref_transform()
+        out_dic = {}
         keys = list(self.mfx_all)
         for label, obj in self.mfx_all.items():
             # Trim on valid tracks
-            lnc[label] = obj['itr']['lnc'][obj['vld']]
-            loc[label] = obj['itr']['loc'][obj['vld']]
-            tim[label] = obj['tim'][obj['vld']]
-            tid[label] = obj['tid'][obj['vld']]
+            lnc = obj['itr']['lnc'][obj['vld']]
+            loc = obj['itr']['loc'][obj['vld']]
+            tim = obj['tim'][obj['vld']]
+            tid = obj['tid'][obj['vld']]
 
             # further trim for time ref_beads
-            tim_trim = tim[label] < self.maxtime_ref_beads[label]
-            lnc[label] = lnc[label][tim_trim]
-            loc[label] = loc[label][tim_trim]
-            tim[label] = tim[label][tim_trim]
-            tid[label] = tid[label][tim_trim]
+            tim_trim = tim < self.maxtime_ref_beads[label]
+            lnc = lnc[tim_trim]
+            loc = loc[tim_trim]
+            tim = tim[tim_trim]
+            tid = tid[tim_trim]
             # Keep only last iteration
-            lnc[label] = lnc[label][:, -1]
-            loc[label] = loc[label][:, -1]
+            lnc = lnc[:, -1]
+            loc = loc[:, -1]
+            out_dic[label] = {'tim': tim, 'tid': tid, 'lnc': lnc, 'loc': loc}
+
 
         # Add time
-        addtime = 0
+        add_time = 0
         for idx in range(1, len(keys)):
-            addtime += self.maxtime_ref_beads[keys[idx - 1]]
-            tim[keys[idx]] = tim[keys[idx]] + addtime
+            add_time += self.maxtime_ref_beads[keys[idx - 1]]
+            out_dic[keys[idx]]['tim'] = out_dic[keys[idx]]['tim'] + add_time
 
+        # register
         for label in self.mfx_all:
-            loc_reg[label] = self.apply_ref_transform(transform[self.TRANS], transform[self.ROT], lnc[label],
-                                                      tim[label])
-        return [tim, lnc, loc, loc_reg]
+            out_dic[label]['lre'] = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
+                                                             out_dic[label]['lnc'], out_dic[label]['tim'])
+        #for label in self.mfx_all:
+        return out_dic
+
+    def export_mat(self, out_dict):
+        scipy.io.savemat(os.path.join(self.outdir, self.filename + ".mat"), out_dict)
+
 
 
 if __name__ == "__main__":
     mfx = MfxData("C:/Users/apoliti/Desktop/mfluxtest/220309_VGlut_paint_2nM_3DMINFLUX_16p_PH0_6_05b.msr")
     mfx.zarr_import()
-    transform = mfx.get_ref_transform()
-    mfx.show_ref_transform(transform[mfx.TRANS], transform[mfx.ROT])
+
+    regis = mfx.get_ref_transform()
+    out_dic = mfx.align_to_ref()
+    mfx.export_mat(out_dic)
+    mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT])
