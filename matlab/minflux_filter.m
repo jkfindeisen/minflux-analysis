@@ -1,4 +1,4 @@
-function [pos, id, rpos] = minflux_filter(pos, id)
+function [pos, id, rpos] = minflux_filter(pos, id, epsilon, minpts)
 % Filters localizations
 %
 % Note
@@ -7,9 +7,11 @@ function [pos, id, rpos] = minflux_filter(pos, id)
 %
 % Other ideas include dbscan, density based.
 
-%% parameters (customize here)
-epsilon = 10e-9; % dbscan parameter
-minpts = 3;  % dbscan parameter
+%% parameters default
+if nargin < 3 
+    epsilon = 10e-9; % dbscan parameter THIS IS 10 nm!
+    minpts = 3;  % dbscan parameter
+end
 
 %% sort by id and obtain first, last indices (id should already be sorted, but you never know)
 [id, idx] = sort(id);
