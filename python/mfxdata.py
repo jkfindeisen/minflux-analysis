@@ -1,5 +1,7 @@
 """
-Utility class to read MinFluX data from Abberior microscopes
+Utility class to read MinFluX data from Abberior microscopes and perform some post processing
+The class can perform a registration using beads and combine different acquisition that have been subsequently performed (PAINT)
+The registration transform is translation (recommended) or translation + rotation (!! Rotation gives wrong results if beads are colinear !!)
 specpy class is from Imspector installation (C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\)
 Author: Antonio Politi, MPINAT, 07.2022
 """
@@ -197,34 +199,45 @@ class MfxData:
     def apply_ref_transform(self, translate, rotate, pos_array, time_vector):
         # apply translation followed by rotation
         pos_array_reg = self.apply_ref_translate(translate, pos_array, time_vector)
-        pos_array_reg = self.apply_ref_rotate(rotate, pos_array_reg, time_vector)
+        pos_array_reg = self.apply_ref_rotate(rotate, pos_array_reg.copy(), time_vector)
         return pos_array_reg
 
     def show_ref_transform(self, translate, rotate):
         [time_vector, pos_array, time_std_vector] = self.get_ref()
+        pos_array_translate = np.zeros_like(pos_array)
         pos_array_translate_rotate = np.zeros_like(pos_array) # this is important otherwise pas by reference
+
         for idx in range(0, pos_array.shape[1]):
+            pos_array_translate[:, idx] = self.apply_ref_translate(translate, pos_array[:, idx],
+                                                           time_vector)
             pos_array_translate_rotate[:, idx] = self.apply_ref_transform(translate, rotate, pos_array[:, idx],
                                                                           time_vector)
 
-        fig, axs = plt.subplots(3, 2, sharex=True, sharey=True)
+        fig, axs = plt.subplots(3, 3, sharex=True, sharey=True)
         labels = ['x_pos', 'y_pos', 'z_pos']
         for ax_idx, ax in enumerate(axs):
             # Loop through the reference objects
             for idx in range(pos_array.shape[1]):
                 ax[0].plot(time_vector, pos_array[:, idx, ax_idx] - pos_array[0, idx, ax_idx])
-                ax[1].plot(time_vector, pos_array_translate_rotate[:, idx, ax_idx] -
+                ax[1].plot(time_vector, pos_array_translate[:, idx, ax_idx] -
+                           np.mean(pos_array_translate[0, idx, ax_idx]))
+                ax[2].plot(time_vector, pos_array_translate_rotate[:, idx, ax_idx] -
                            np.mean(pos_array_translate_rotate[0, idx, ax_idx]),
                            ls="--", label=self.valid_ref_beads['P1'][idx])
 
-            ax[1].legend()
+            ax[2].legend()
             ax[0].set_ylabel(labels[ax_idx])
         ref_error = self.compute_ref_transform_error(pos_array)
+        ref_error_translate = self.compute_ref_transform_error(pos_array_translate)
         ref_error_translate_rotate = self.compute_ref_transform_error(pos_array_translate_rotate)
 
         axs[0][0].set_title('Unregistered, std (nm) %.2f, se (nm) %.2f' % (ref_error['std'] * math.pow(10, 9),
                                                                            ref_error['ste'] * math.pow(10, 9)))
-        axs[0][1].set_title('Reg. translate + rotate, std (nm) %.2f, se (nm) %.2f' % (
+        axs[0][1].set_title('Reg. translate, std (nm) %.2f, se (nm) %.2f' % (
+            ref_error_translate['std'] * math.pow(10, 9),
+            ref_error_translate['ste'] * math.pow(10, 9)))
+
+        axs[0][2].set_title('Reg. translate + rotate, std (nm) %.2f, se (nm) %.2f' % (
             ref_error_translate_rotate['std'] * math.pow(10, 9),
             ref_error_translate_rotate['ste'] * math.pow(10, 9)))
         plt.show()
@@ -260,14 +273,33 @@ class MfxData:
 
         # register
         for label in self.mfx_all:
+            out_dic[label]['ltr'] = self.apply_ref_translate(register[self.TRANS],
+                                                             out_dic[label]['lnc'], out_dic[label]['tim'])
             out_dic[label]['lre'] = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
                                                              out_dic[label]['lnc'], out_dic[label]['tim'])
+
         #for label in self.mfx_all:
         return out_dic
 
     def export_mat(self, out_dict):
         scipy.io.savemat(os.path.join(self.outdir, self.filename + ".mat"), out_dict)
 
+    def export_ref_mat(self):
+        register = self.get_ref_transform()
+        [time_vector, pos_array, time_std_vector] = self.get_ref()
+        flat_pos = np.reshape(pos_array, (pos_array.shape[0]*pos_array.shape[1], pos_array.shape[2]))
+        time_vector = np.repeat(time_vector, pos_array.shape[1])
+
+        flat_pos_trans = self.apply_ref_translate(register[self.TRANS], flat_pos, time_vector)
+
+        flat_pos_reg = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
+                                                flat_pos, time_vector)
+        # this is important otherwise pas by reference
+
+
+
+        out_dict = {'tim': time_vector, 'lnc': flat_pos, 'ltr': flat_pos_trans, 'lre': flat_pos_reg}
+        scipy.io.savemat(os.path.join(self.outdir, "refBeads.mat"), out_dict)
 
 
 if __name__ == "__main__":
@@ -277,4 +309,5 @@ if __name__ == "__main__":
     regis = mfx.get_ref_transform()
     out_dic = mfx.align_to_ref()
     mfx.export_mat(out_dic)
+    mfx.export_ref_mat()
     mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT])
