@@ -1,4 +1,4 @@
-function id = minflux_cluster_identify(pos)
+function id = minflux_cluster_identify(pos, epsilon, minpts)
 % Identifies clusters (by various methods)
 %
 % Methods
@@ -8,9 +8,11 @@ function id = minflux_cluster_identify(pos)
 %   - tesselation based (inspired by Marcel Leutenegger and Henrik von der
 %     Emde)
 
-% parameters
-epsilon = 10e-9; % dbscan parameter
-minpts = 5;  % dbscan parameter
+%% parameters default
+if nargin < 3 
+    epsilon = 10e-9; % dbscan parameter
+    minpts = 3;  % dbscan parameter
+end
 
 % call to dbscan (this can potentially take very long, scales quite badly
 % with number of psotitions)

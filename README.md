@@ -75,9 +75,32 @@ Notes:
   (fbg determined wrongly)
 
 
+# Imspector/Parview 
+Save data of paraview to file to load different measurements in one sample.
+From Imspector launch paraview and than save data. 
+
+# Loadig of msr files using python
+Impsector comes with python libraries for the handling of the files. 
+specpy is located at `C:\Imspector\Versions\IDOFIMSPECTORVERSION\python\PythonVersion-NumpyVersion`
+e.g. `C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\Python3.9.2-NumPy1.20.1`
+create environment with appropriate python version
+`conda create -n imspector-env python=3.9.2
+conda activate imspector
+cd C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\Python3.9.2-NumPy1.20.1
+pip install specpy-1.2.3-cp39-cp39-win_amd64.whl`
+
+
+load a msr 
+`file=specpy.File("name.msr")` 
+list the contained Minflux data sets (see dir() for the respective functions, they should be recognizable by name). 
+Then, use unpack() to extract the data as a zarr to disk. 
+This way, you can access all the mbm reference bead infos under /zarr/grd/mbm as arrays. 
+The names of the beads that were used for the lnc->loc conversion are stored as "used" attribute of the mbm group.
+
 ### Beads for beam adjustment
 
 You access the bead positions via the Zarr archive in the data directory (usually C:\Data\<data uid>\zarr) 
 while the measurement is open in Imspector. Within the archive structure, their localization data 
 is stored at /grd/mbm/R<nn>.
+
 
