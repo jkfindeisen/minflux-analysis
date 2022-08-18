@@ -15,7 +15,7 @@ from scipy.spatial import transform
 from scipy.interpolate import interp1d
 import math
 from matplotlib import pyplot as plt
-
+import warnings
 
 class MfxData:
     MAX_TDIFF_REF = 10    # time difference between final record of ref (beads) and mfx recording in sec.
@@ -23,22 +23,23 @@ class MfxData:
     mfx_all = {}          # stores mfx measurements all washes
     valid_ref_beads = {}  # Beads recording that fulfill minimal requirements
     maxtime_ref_beads = {}  # Consensus max time between reference beads recording. Mfx recording is cropped accordingly
-
-
+    msrfile_path = None
+    msrfile_name = None
+    outdir = None
+    zarrdir = None
     TRANS = 'translate'
     ROT = 'rotate'
 
-    def __init__(self, msrfile):
-        if not os.path.exists(msrfile):
-            raise OSError(msrfile + " file does not exist!")
-        self.msrfile = msrfile
+    def __init__(self, file_path):
+        if not os.path.exists(file_path):
+            raise OSError(file_path + " file does not exist!")
+        self.msrfile_path = file_path
 
-        self.filepath = os.path.dirname(msrfile)
-        self.filename = os.path.splitext(os.path.basename(self.msrfile))[0]
+        self.msrfile_name = os.path.splitext(os.path.basename(self.msrfile_path))[0]
         # These are default values that can be overwritten
 
-        self.outdir = self.get_outdir(self.msrfile)
-        self.zarrdir = self.get_zarrdir(self.outdir, self.msrfile)
+        self.outdir = self.get_outdir(self.msrfile_path)
+        self.zarrdir = self.get_zarrdir(self.outdir, self.msrfile_path)
 
 
     @staticmethod
@@ -65,7 +66,7 @@ class MfxData:
         :param msrfile: path of msrfile
         :return: None
         """
-        afile = specpy.File(self.msrfile, File.Read)
+        afile = specpy.File(self.msrfile_path, File.Read)
         mf_data_sets = afile.minflux_data_sets()
         for mf in mf_data_sets:
             afile.unpack(mf['sid'], self.zarrdir[mf['label']])
@@ -95,24 +96,31 @@ class MfxData:
         internal variable will be set in this function
         :param force: force import
         """
+        # TODO When unequal number of references find consensus
         self.zarr_import()
         valid_ref_beads = {}
-        if len(self.valid_ref_beads) == 0 or force:
-            for label in self.ref_all:
-                ref = self.ref_all[label]
-                mfx = self.mfx_all[label]
-                valid_tmax = max(mfx['tim'][mfx['vld']])
-                vld = []
-                for key, r in ref.items():
-                    if len(r['tim']) == 0:
-                        continue
-                    if max(r['tim']) > valid_tmax:
-                        vld.append(key)
-                        continue
-                    if abs(max(r['tim']) - valid_tmax) <= self.MAX_TDIFF_REF:
-                        vld.append(key)
-                valid_ref_beads[label] = vld
-            self.valid_ref_beads = valid_ref_beads
+        if force or len(self.valid_ref_beads) > 0:
+            return
+        for label in self.ref_all:
+            ref = self.ref_all[label]
+            mfx = self.mfx_all[label]
+            valid_tmax = max(mfx['tim'][mfx['vld']])
+            vld = []
+            for key, r in ref.items():
+                if len(r['tim']) == 0:
+                    continue
+                if max(r['tim']) > valid_tmax:
+                    vld.append(key)
+                    continue
+                if abs(max(r['tim']) - valid_tmax) <= self.MAX_TDIFF_REF:
+                    vld.append(key)
+            valid_ref_beads[label] = vld
+        # Match the beads in the different washes
+        keys = list(valid_ref_beads)
+        vld_ref_all = valid_ref_beads[keys[0]]
+        for i in range(1, len(keys)):
+            vld_ref_all = [x for x in vld_ref_all if x in valid_ref_beads[keys[i]]]
+        self.valid_ref_beads = vld_ref_all
 
     def get_ref(self):
         """
@@ -125,20 +133,20 @@ class MfxData:
         time_std_vector = []
 
         # Check for length of recording and consistency in difference between measurements
-        for label, beads_id in self.valid_ref_beads.items():
+        for label in self.ref_all:
             # Have same length
-            n_el = [len(self.ref_all[label][b]) for b in beads_id]
+            n_el = [len(self.ref_all[label][b]) for b in self.valid_ref_beads]
             if n_el.count(n_el[0]) != len(n_el):
                 n_el = min(n_el)
             else:
                 n_el = n_el[0]
             # Average time through the measurements of each round
-            time_stack = np.stack([self.ref_all[label][b]['tim'][:n_el] for b in beads_id], axis=1)
+            time_stack = np.stack([self.ref_all[label][b]['tim'][:n_el] for b in self.valid_ref_beads], axis=1)
             time_mean = np.mean(time_stack, axis=1)
             self.maxtime_ref_beads[label] = time_mean[-1] # CONSISTENCY!
             time_vector.append(time_mean)
             time_std_vector.append(np.std(time_stack, axis=1))
-            pos_array.append(np.stack([self.ref_all[label][b]['pos'][:n_el] for b in beads_id], axis=1))
+            pos_array.append(np.stack([self.ref_all[label][b]['pos'][:n_el] for b in self.valid_ref_beads], axis=1))
 
         # TODO This is not consistent in case there is a variation in order of label and idx ??
         for i in range(1, len(time_vector)):
@@ -176,14 +184,18 @@ class MfxData:
         # interpolate the translation
         translate = interp1d(time_vector, centroids, axis=0)
 
-        # Rotation
-        rot = []
-        for idx in range(pos_array_translate.shape[0]):
-            [rot_loc, rmsd] = transform.Rotation.align_vectors(pos_array_translate[0], pos_array_translate[idx])
-            rot.append(rot_loc)
-        # concatenate rotations (newer version of scipy does it in one go)
-        rot_vec = transform.Rotation.from_rotvec([r.as_rotvec() for r in rot])
-        rotate = transform.Slerp(time_vector, rot_vec)
+        if len(self.valid_ref_beads) < 3:
+            warnings.warn("Less than 3 reference beads, rotation registration is not computed", category=UserWarning)
+            rotate = None
+        else:
+            # Rotation
+            rot = []
+            for idx in range(pos_array_translate.shape[0]):
+                [rot_loc, rmsd] = transform.Rotation.align_vectors(pos_array_translate[0], pos_array_translate[idx])
+                rot.append(rot_loc)
+            # concatenate rotations (newer version of scipy does it in one go)
+            rot_vec = transform.Rotation.from_rotvec([r.as_rotvec() for r in rot])
+            rotate = transform.Slerp(time_vector, rot_vec)
 
         out_transform = {self.TRANS: translate, self.ROT: rotate}
         return out_transform
@@ -202,45 +214,47 @@ class MfxData:
         pos_array_reg = self.apply_ref_rotate(rotate, pos_array_reg.copy(), time_vector)
         return pos_array_reg
 
-    def show_ref_transform(self, translate, rotate):
+    def show_ref_transform(self, translate, rotate, show=False, save=False):
+        if not save and not show:
+            return
         [time_vector, pos_array, time_std_vector] = self.get_ref()
         pos_array_translate = np.zeros_like(pos_array)
         pos_array_translate_rotate = np.zeros_like(pos_array) # this is important otherwise pas by reference
 
         for idx in range(0, pos_array.shape[1]):
             pos_array_translate[:, idx] = self.apply_ref_translate(translate, pos_array[:, idx],
-                                                           time_vector)
-            pos_array_translate_rotate[:, idx] = self.apply_ref_transform(translate, rotate, pos_array[:, idx],
-                                                                          time_vector)
+                                                                   time_vector)
+            if rotate is not None:
+                pos_array_translate_rotate[:, idx] = self.apply_ref_transform(translate, rotate, pos_array[:, idx],
+                                                                              time_vector)
+        titles = ['Unregistered, std (nm) %.2f, se (nm) %.2f\n', 'Translate, std (nm) %.2f, se (nm) %.2f\n', 'Translate + rotate, std (nm) %.2f, se (nm) %.2f\n']
+        if rotate is None:
+            obj_to_plot = [pos_array, pos_array_translate]
+        else:
+            obj_to_plot = [pos_array, pos_array_translate, pos_array_translate_rotate]
 
-        fig, axs = plt.subplots(3, 3, sharex=True, sharey=True)
+        fig, axs = plt.subplots(3, len(obj_to_plot), sharex=True, sharey=True, figsize=(10, 5))
+
         labels = ['x_pos', 'y_pos', 'z_pos']
         for ax_idx, ax in enumerate(axs):
             # Loop through the reference objects
             for idx in range(pos_array.shape[1]):
-                ax[0].plot(time_vector, pos_array[:, idx, ax_idx] - pos_array[0, idx, ax_idx])
-                ax[1].plot(time_vector, pos_array_translate[:, idx, ax_idx] -
-                           np.mean(pos_array_translate[0, idx, ax_idx]))
-                ax[2].plot(time_vector, pos_array_translate_rotate[:, idx, ax_idx] -
-                           np.mean(pos_array_translate_rotate[0, idx, ax_idx]),
-                           ls="--", label=self.valid_ref_beads['P1'][idx])
-
-            ax[2].legend()
+                for iobj in range(len(obj_to_plot)):
+                    ax[iobj].plot(time_vector, obj_to_plot[iobj][:, idx, ax_idx] -
+                                 obj_to_plot[iobj][0, idx, ax_idx], label=self.valid_ref_beads[idx])
+            ax[0].legend(fontsize=8)
             ax[0].set_ylabel(labels[ax_idx])
-        ref_error = self.compute_ref_transform_error(pos_array)
-        ref_error_translate = self.compute_ref_transform_error(pos_array_translate)
-        ref_error_translate_rotate = self.compute_ref_transform_error(pos_array_translate_rotate)
 
-        axs[0][0].set_title('Unregistered, std (nm) %.2f, se (nm) %.2f' % (ref_error['std'] * math.pow(10, 9),
-                                                                           ref_error['ste'] * math.pow(10, 9)))
-        axs[0][1].set_title('Reg. translate, std (nm) %.2f, se (nm) %.2f' % (
-            ref_error_translate['std'] * math.pow(10, 9),
-            ref_error_translate['ste'] * math.pow(10, 9)))
 
-        axs[0][2].set_title('Reg. translate + rotate, std (nm) %.2f, se (nm) %.2f' % (
-            ref_error_translate_rotate['std'] * math.pow(10, 9),
-            ref_error_translate_rotate['ste'] * math.pow(10, 9)))
-        plt.show()
+        ref_error = [self.compute_ref_transform_error(obj) for obj in obj_to_plot]
+        for iobj in range(len(obj_to_plot)):
+            axs[0][iobj].set_title(titles[iobj] % (ref_error[iobj]['std'] * math.pow(10, 9),
+                                                   ref_error[iobj]['ste'] * math.pow(10, 9)), fontsize=8)
+            axs[2][iobj].set_xlabel('time (sec)')
+        if save:
+            plt.savefig(os.path.join(self.outdir, self.msrfile_name + "_ref_drift.png"))
+        if show:
+            plt.show()
 
     def align_to_ref(self):
         register = self.get_ref_transform()
@@ -275,14 +289,15 @@ class MfxData:
         for label in self.mfx_all:
             out_dic[label]['ltr'] = self.apply_ref_translate(register[self.TRANS],
                                                              out_dic[label]['lnc'], out_dic[label]['tim'])
-            out_dic[label]['lre'] = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
-                                                             out_dic[label]['lnc'], out_dic[label]['tim'])
-
-        #for label in self.mfx_all:
+            if register[self.ROT] is None:
+                out_dic[label]['lre'] = np.zeros_like(out_dic[label]['lnc'])
+            else:
+                out_dic[label]['lre'] = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
+                                                                 out_dic[label]['lnc'], out_dic[label]['tim'])
         return out_dic
 
     def export_mat(self, out_dict):
-        scipy.io.savemat(os.path.join(self.outdir, self.filename + ".mat"), out_dict)
+        scipy.io.savemat(os.path.join(self.outdir, self.msrfile_name + ".mat"), out_dict)
 
     def export_ref_mat(self):
         register = self.get_ref_transform()
@@ -291,23 +306,30 @@ class MfxData:
         time_vector = np.repeat(time_vector, pos_array.shape[1])
 
         flat_pos_trans = self.apply_ref_translate(register[self.TRANS], flat_pos, time_vector)
+        if register[self.ROT] is not None:
+            flat_pos_reg = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
+                                                    flat_pos, time_vector)
+        else:
+            flat_pos_reg = np.zeros_like(flat_pos)
+        # Center to 0 for rendering
+        pos_array2 = pos_array.copy() - np.mean(pos_array, axis=1)[0]
+        flat_pos2 = np.reshape(pos_array2, (pos_array2.shape[0]*pos_array2.shape[1], pos_array2.shape[2]))
 
-        flat_pos_reg = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
-                                                flat_pos, time_vector)
-        # this is important otherwise pas by reference
-
-
-
-        out_dict = {'tim': time_vector, 'lnc': flat_pos, 'ltr': flat_pos_trans, 'lre': flat_pos_reg}
-        scipy.io.savemat(os.path.join(self.outdir, "refBeads.mat"), out_dict)
+        out_dict = {'tim': time_vector, 'lnc': flat_pos2, 'ltr': flat_pos_trans, 'lre': flat_pos_reg}
+        scipy.io.savemat(os.path.join(self.outdir, self.msrfile_name + "_ref.mat"), out_dict)
 
 
 if __name__ == "__main__":
-    mfx = MfxData("C:/Users/apoliti/Desktop/mfluxtest/220309_VGlut_paint_2nM_3DMINFLUX_16p_PH0_6_05b.msr")
+    mfx = MfxData("C:/Users/apoliti/Desktop/mfluxtest/data/220309_VGlut_paint_2nM_3DMINFLUX_16p_PH0_6_05b.msr")
+    # different default output
+    mfx.outdir = os.path.join("C:/Users/apoliti/Desktop/mfluxtest/analysis", mfx.msrfile_name)
+    mfx.zarrdir = mfx.get_zarrdir(mfx.outdir, mfx.msrfile_path)
+
     mfx.zarr_import()
+    mfx.set_valid_ref()
 
     regis = mfx.get_ref_transform()
     out_dic = mfx.align_to_ref()
     mfx.export_mat(out_dic)
     mfx.export_ref_mat()
-    mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT])
+    mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT], save=True, show=False)
