@@ -16,6 +16,7 @@ from scipy.interpolate import interp1d
 import math
 from matplotlib import pyplot as plt
 import warnings
+from evtk import hl
 
 class MfxData:
     MAX_TDIFF_REF = 10    # time difference between final record of ref (beads) and mfx recording in sec.
@@ -279,14 +280,23 @@ class MfxData:
             out_dic[label] = {'tim': tim, 'tid': tid, 'lnc': lnc, 'loc': loc}
 
 
+
         # Add time
         add_time = 0
+        add_tid = 0
         for idx in range(1, len(keys)):
+            add_tid += out_dic[keys[idx-1]]['tid'][-1]
             add_time += self.maxtime_ref_beads[keys[idx - 1]]
             out_dic[keys[idx]]['tim'] = out_dic[keys[idx]]['tim'] + add_time
+            out_dic[keys[idx]]['tid'] = out_dic[keys[idx]]['tid'] + add_tid
 
         # register
         for label in self.mfx_all:
+            # Translate to center for convenience
+            out_dic[label]['lnc'] = self.apply_ref_translate(register[self.TRANS],
+                                                             out_dic[label]['lnc'], out_dic[label]['tim'][0])
+            out_dic[label]['loc'] = self.apply_ref_translate(register[self.TRANS],
+                                                             out_dic[label]['loc'], out_dic[label]['tim'][0])
             out_dic[label]['ltr'] = self.apply_ref_translate(register[self.TRANS],
                                                              out_dic[label]['lnc'], out_dic[label]['tim'])
             if register[self.ROT] is None:
@@ -318,6 +328,19 @@ class MfxData:
         out_dict = {'tim': time_vector, 'lnc': flat_pos2, 'ltr': flat_pos_trans, 'lre': flat_pos_reg}
         scipy.io.savemat(os.path.join(self.outdir, self.msrfile_name + "_ref.mat"), out_dict)
 
+    def export_vtu(self, out_dict, lcoord):
+        # export to vtk format for view in paraview, ideally also clustering etc. 
+
+        pos_concat = np.concatenate([out_dict[d][lcoord] for d in out_dict])
+        tid_concat = np.concatenate([out_dict[d]['tid'] for d in out_dict])
+        tim_concat = np.concatenate([out_dict[d]['tim'] for d in out_dict])
+        # concatenate positions
+        x = np.ascontiguousarray(pos_concat[:, 0], dtype = np.float64)
+        y = np.ascontiguousarray(pos_concat[:, 1], dtype = np.float64)
+        z = np.ascontiguousarray(pos_concat[:, 2], dtype = np.float64)
+        keys = list(out_dict.keys())
+        p = np.repeat(range(1,len(keys)+1), [out_dict[k][lcoord].shape[0] for k in keys])
+        hl.pointsToVTK("C:/Users/apoliti/Desktop/points", x, y, z, data={'P': p, 'tid': tid_concat, 'tim':  tim_concat})
 
 if __name__ == "__main__":
     mfx = MfxData("C:/Users/apoliti/Desktop/mfluxtest/data/220309_VGlut_paint_2nM_3DMINFLUX_16p_PH0_6_05b.msr")
@@ -330,6 +353,8 @@ if __name__ == "__main__":
 
     regis = mfx.get_ref_transform()
     out_dic = mfx.align_to_ref()
-    mfx.export_mat(out_dic)
-    mfx.export_ref_mat()
-    mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT], save=True, show=False)
+    mfx.export_vtu(out_dic, 'loc')
+
+    #mfx.export_mat(out_dic)
+    #mfx.export_ref_mat()
+    #mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT], save=True, show=False)
