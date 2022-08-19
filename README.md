@@ -97,5 +97,10 @@ Then, use unpack() to extract the data as a zarr to disk.
 This way, you can access all the mbm reference bead infos under /zarr/grd/mbm as arrays. 
 The names of the beads that were used for the lnc->loc conversion are stored as "used" attribute of the mbm group.
 
+### Beads for beam adjustment
 
- 
+You access the bead positions via the Zarr archive in the data directory (usually C:\Data\<data uid>\zarr) 
+while the measurement is open in Imspector. Within the archive structure, their localization data 
+is stored at /grd/mbm/R<nn>.
+
+
