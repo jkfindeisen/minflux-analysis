@@ -338,7 +338,7 @@ class MfxData:
         x = np.ascontiguousarray(pos_concat[:, 0], dtype = np.float64)
         y = np.ascontiguousarray(pos_concat[:, 1], dtype = np.float64)
         z = np.ascontiguousarray(pos_concat[:, 2], dtype = np.float64)
-        r = np.random.uniform(0, 1, x.shape[0])
+        r = np.random.uniform(0, 1, x.shape[0]) # This needs to be computed
         keys = list(out_dict.keys())
         p = np.repeat(range(1,len(keys)+1), [out_dict[k][lcoord].shape[0] for k in keys])
         hl.pointsToVTK("C:/Users/apoliti/Desktop/points", x, y, z, data={'P': p, 'tid': tid_concat, 'tim':  tim_concat,
