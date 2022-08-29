@@ -277,7 +277,8 @@ class MfxData:
             # Keep only last iteration
             lnc = lnc[:, -1]
             loc = loc[:, -1]
-            out_dic[label] = {'tim': tim, 'tid': tid, 'lnc': lnc, 'loc': loc}
+            vld = obj['vld'][obj['vld']]
+            out_dic[label] = {'tim': tim, 'tid': tid, 'lnc': lnc, 'loc': loc, 'vld': vld}
 
 
 
@@ -305,6 +306,9 @@ class MfxData:
                 out_dic[label]['lre'] = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
                                                                  out_dic[label]['lnc'], out_dic[label]['tim'])
         return out_dic
+
+    def export_numpy(self, out_dict):
+        np.save(os.path.join(self.outdir, self.msrfile_name + ".npy"), out_dict)
 
     def export_mat(self, out_dict):
         scipy.io.savemat(os.path.join(self.outdir, self.msrfile_name + ".mat"), out_dict)
@@ -356,7 +360,7 @@ if __name__ == "__main__":
     regis = mfx.get_ref_transform()
     out_dic = mfx.align_to_ref()
     mfx.export_vtu(out_dic, 'loc')
-
+    mfx.export_numpy(out_dic)
     #mfx.export_mat(out_dic)
     #mfx.export_ref_mat()
     #mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT], save=True, show=False)
