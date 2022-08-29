@@ -329,7 +329,7 @@ class MfxData:
         scipy.io.savemat(os.path.join(self.outdir, self.msrfile_name + "_ref.mat"), out_dict)
 
     def export_vtu(self, out_dict, lcoord):
-        # export to vtk format for view in paraview, ideally also clustering etc. 
+        # export to vtk format for view in paraview, ideally also clustering etc.
 
         pos_concat = np.concatenate([out_dict[d][lcoord] for d in out_dict])
         tid_concat = np.concatenate([out_dict[d]['tid'] for d in out_dict])
@@ -338,9 +338,11 @@ class MfxData:
         x = np.ascontiguousarray(pos_concat[:, 0], dtype = np.float64)
         y = np.ascontiguousarray(pos_concat[:, 1], dtype = np.float64)
         z = np.ascontiguousarray(pos_concat[:, 2], dtype = np.float64)
+        r = np.random.uniform(0, 1, x.shape[0])
         keys = list(out_dict.keys())
         p = np.repeat(range(1,len(keys)+1), [out_dict[k][lcoord].shape[0] for k in keys])
-        hl.pointsToVTK("C:/Users/apoliti/Desktop/points", x, y, z, data={'P': p, 'tid': tid_concat, 'tim':  tim_concat})
+        hl.pointsToVTK("C:/Users/apoliti/Desktop/points", x, y, z, data={'P': p, 'tid': tid_concat, 'tim':  tim_concat,
+                                                                         'radius': r})
 
 if __name__ == "__main__":
     mfx = MfxData("C:/Users/apoliti/Desktop/mfluxtest/data/220309_VGlut_paint_2nM_3DMINFLUX_16p_PH0_6_05b.msr")
