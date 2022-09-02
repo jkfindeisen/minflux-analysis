@@ -269,6 +269,12 @@ class MfxData:
         keys = list(self.mfx_all)
         for label, obj in self.mfx_all.items():
             # Trim on valid tracks
+            print("Valid tracks %s %d/%d" % (label, len(np.unique(obj[col.TID][obj[col.VLD]])),
+                                             len(np.unique(obj[col.TID]))))
+            lnc_nv = obj[col.ITR][col.LNC][~obj[col.VLD]]
+            lnc_nv = lnc_nv[:, -1]
+            print("Localizations in invalid tracks %s %d/%d" % (label, len(lnc_nv[~np.isnan(lnc_nv[:, 0]), 0]),
+                                                                       len(lnc_nv[np.isnan(lnc_nv[:,0]), 0])))
             lnc = obj[col.ITR][col.LNC][obj[col.VLD]]
             loc = obj[col.ITR][col.LOC][obj[col.VLD]]
             tim = obj[col.TIM][obj[col.VLD]]
