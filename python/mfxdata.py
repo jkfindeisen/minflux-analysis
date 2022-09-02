@@ -5,7 +5,6 @@ The registration transform is translation (recommended) or translation + rotatio
 specpy class is from Imspector installation (C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\)
 Author: Antonio Politi, MPINAT, 07.2022
 """
-# TODO save as mat file for clustering (this should move to python also)
 import scipy.io
 import zarr
 import os
@@ -16,9 +15,14 @@ from scipy.interpolate import interp1d
 import math
 from matplotlib import pyplot as plt
 import warnings
+from evtk import hl
+import mfxcolnames as col
 
 class MfxData:
     MAX_TDIFF_REF = 10    # time difference between final record of ref (beads) and mfx recording in sec.
+    CORRECT_Z_POSITION_FACTOR = 0.7 # Correction due to oil water RI difference
+    CORRECT_Z_POSITION_FACTOR_REF = 0.7
+
     ref_all = {}          # stores ref beads
     mfx_all = {}          # stores mfx measurements all washes
     valid_ref_beads = {}  # Beads recording that fulfill minimal requirements
@@ -90,6 +94,8 @@ class MfxData:
                 self.ref_all[label] = zarr_data.grd.mbm
                 self.mfx_all[label] = zarr_data.mfx
 
+
+
     def set_valid_ref(self, force=False):
         """
         Make consistency check on ref_all, e.g. long enough recording.
@@ -104,15 +110,15 @@ class MfxData:
         for label in self.ref_all:
             ref = self.ref_all[label]
             mfx = self.mfx_all[label]
-            valid_tmax = max(mfx['tim'][mfx['vld']])
+            valid_tmax = max(mfx[col.TIM][mfx[col.VLD]])
             vld = []
             for key, r in ref.items():
-                if len(r['tim']) == 0:
+                if len(r[col.TIM]) == 0:
                     continue
-                if max(r['tim']) > valid_tmax:
+                if max(r[col.TIM]) > valid_tmax:
                     vld.append(key)
                     continue
-                if abs(max(r['tim']) - valid_tmax) <= self.MAX_TDIFF_REF:
+                if abs(max(r[col.TIM]) - valid_tmax) <= self.MAX_TDIFF_REF:
                     vld.append(key)
             valid_ref_beads[label] = vld
         # Match the beads in the different washes
@@ -141,12 +147,12 @@ class MfxData:
             else:
                 n_el = n_el[0]
             # Average time through the measurements of each round
-            time_stack = np.stack([self.ref_all[label][b]['tim'][:n_el] for b in self.valid_ref_beads], axis=1)
+            time_stack = np.stack([self.ref_all[label][b][col.TIM][:n_el] for b in self.valid_ref_beads], axis=1)
             time_mean = np.mean(time_stack, axis=1)
             self.maxtime_ref_beads[label] = time_mean[-1] # CONSISTENCY!
             time_vector.append(time_mean)
             time_std_vector.append(np.std(time_stack, axis=1))
-            pos_array.append(np.stack([self.ref_all[label][b]['pos'][:n_el] for b in self.valid_ref_beads], axis=1))
+            pos_array.append(np.stack([self.ref_all[label][b][col.POS][:n_el] for b in self.valid_ref_beads], axis=1))
 
         # TODO This is not consistent in case there is a variation in order of label and idx ??
         for i in range(1, len(time_vector)):
@@ -155,6 +161,7 @@ class MfxData:
         time_vector = np.concatenate(time_vector)
         time_std_vector = np.concatenate(time_std_vector)
         pos_array = np.concatenate(pos_array)
+        pos_array[:, :, 2] = pos_array[:, :, 2]*self.CORRECT_Z_POSITION_FACTOR_REF
         return [time_vector, pos_array, time_std_vector]
 
     def compute_ref_transform_error(self, pos_array):
@@ -262,39 +269,70 @@ class MfxData:
         keys = list(self.mfx_all)
         for label, obj in self.mfx_all.items():
             # Trim on valid tracks
-            lnc = obj['itr']['lnc'][obj['vld']]
-            loc = obj['itr']['loc'][obj['vld']]
-            tim = obj['tim'][obj['vld']]
-            tid = obj['tid'][obj['vld']]
-
+            print("Valid tracks %s %d/%d" % (label, len(np.unique(obj[col.TID][obj[col.VLD]])),
+                                             len(np.unique(obj[col.TID]))))
+            lnc_nv = obj[col.ITR][col.LNC][~obj[col.VLD]]
+            lnc_nv = lnc_nv[:, -1]
+            print("Localizations in invalid tracks %s %d/%d" % (label, len(lnc_nv[~np.isnan(lnc_nv[:, 0]), 0]),
+                                                                       len(lnc_nv[np.isnan(lnc_nv[:,0]), 0])))
+            lnc = obj[col.ITR][col.LNC][obj[col.VLD]]
+            loc = obj[col.ITR][col.LOC][obj[col.VLD]]
+            tim = obj[col.TIM][obj[col.VLD]]
+            tid = obj[col.TID][obj[col.VLD]]
+            vld = obj[col.VLD][obj[col.VLD]]
             # further trim for time ref_beads
             tim_trim = tim < self.maxtime_ref_beads[label]
             lnc = lnc[tim_trim]
             loc = loc[tim_trim]
             tim = tim[tim_trim]
             tid = tid[tim_trim]
+            vld = vld[tim_trim]
             # Keep only last iteration
             lnc = lnc[:, -1]
             loc = loc[:, -1]
-            out_dic[label] = {'tim': tim, 'tid': tid, 'lnc': lnc, 'loc': loc}
-
-
+            lnc[:, 2] = lnc[:, 2]*self.CORRECT_Z_POSITION_FACTOR
+            loc[:, 2] = loc[:, 2]*self.CORRECT_Z_POSITION_FACTOR
+            tim_tid_mean = self.get_meantime_trackid(tid, tim)
+            out_dic[label] = {col.TIM: tim, col.TIM_TID_MEAN: tim_tid_mean, col.TID: tid, col.LNC: lnc,
+                              col.LOC: loc, col.VLD: vld}
         # Add time
         add_time = 0
+        add_tid = 0
         for idx in range(1, len(keys)):
+            add_tid += out_dic[keys[idx-1]][col.TID][-1]
             add_time += self.maxtime_ref_beads[keys[idx - 1]]
-            out_dic[keys[idx]]['tim'] = out_dic[keys[idx]]['tim'] + add_time
+            out_dic[keys[idx]][col.TIM] = out_dic[keys[idx]][col.TIM] + add_time
+            out_dic[keys[idx]][col.TIM_TID_MEAN] = out_dic[keys[idx]][col.TIM_TID_MEAN] + add_time
+            out_dic[keys[idx]][col.TID] = out_dic[keys[idx]][col.TID] + add_tid
 
         # register
         for label in self.mfx_all:
-            out_dic[label]['ltr'] = self.apply_ref_translate(register[self.TRANS],
-                                                             out_dic[label]['lnc'], out_dic[label]['tim'])
+            # Translate to center for convenience, translate each track with the same function
+            out_dic[label][col.LNC] = self.apply_ref_translate(register[self.TRANS],
+                                                               out_dic[label][col.LNC], out_dic[label][col.TIM][0])
+            out_dic[label][col.LOC] = self.apply_ref_translate(register[self.TRANS],
+                                                               out_dic[label][col.LOC], out_dic[label][col.TIM][0])
+            # Translate over time
+            out_dic[label][col.LTR] = self.apply_ref_translate(register[self.TRANS],
+                                                               out_dic[label][col.LNC],
+                                                               out_dic[label][col.TIM_TID_MEAN])
             if register[self.ROT] is None:
-                out_dic[label]['lre'] = np.zeros_like(out_dic[label]['lnc'])
+                out_dic[label][col.LRE] = np.zeros_like(out_dic[label][col.LNC])
             else:
-                out_dic[label]['lre'] = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
-                                                                 out_dic[label]['lnc'], out_dic[label]['tim'])
+                out_dic[label][col.LRE] = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
+                                                                   out_dic[label][col.LNC],
+                                                                   out_dic[label][col.TIM_TID_MEAN])
         return out_dic
+
+    def get_meantime_trackid(self, tid, tim):
+        tout = np.copy(tim)
+        for id in np.unique(tid):
+            idx = np.where(tid == id)[0]
+            tout[idx] = np.mean(tim[idx])
+        return tout
+
+    def export_numpy(self, out_dict):
+        np.save(os.path.join(self.outdir, self.msrfile_name + ".npy"), out_dict)
 
     def export_mat(self, out_dict):
         scipy.io.savemat(os.path.join(self.outdir, self.msrfile_name + ".mat"), out_dict)
@@ -315,9 +353,24 @@ class MfxData:
         pos_array2 = pos_array.copy() - np.mean(pos_array, axis=1)[0]
         flat_pos2 = np.reshape(pos_array2, (pos_array2.shape[0]*pos_array2.shape[1], pos_array2.shape[2]))
 
-        out_dict = {'tim': time_vector, 'lnc': flat_pos2, 'ltr': flat_pos_trans, 'lre': flat_pos_reg}
+        out_dict = {col.TIM: time_vector, col.LNC: flat_pos2, col.LTR: flat_pos_trans, col.LRE: flat_pos_reg}
         scipy.io.savemat(os.path.join(self.outdir, self.msrfile_name + "_ref.mat"), out_dict)
 
+    def export_vtu(self, out_dict, lcoord, file_path):
+        # export to vtk format for view in paraview, ideally also clustering etc.
+
+        pos_concat = np.concatenate([out_dict[d][lcoord] for d in out_dict])
+        tid_concat = np.concatenate([out_dict[d][col.TID] for d in out_dict])
+        tim_concat = np.concatenate([out_dict[d][col.TIM] for d in out_dict])
+        # concatenate positions
+        x = np.ascontiguousarray(pos_concat[:, 0], dtype = np.float64)
+        y = np.ascontiguousarray(pos_concat[:, 1], dtype = np.float64)
+        z = np.ascontiguousarray(pos_concat[:, 2], dtype = np.float64)
+        r = np.random.uniform(0, 1, x.shape[0]) # This needs to be computed
+        keys = list(out_dict.keys())
+        p = np.repeat(range(1, len(keys)+1), [out_dict[k][lcoord].shape[0] for k in keys])
+        hl.pointsToVTK(file_path, x, y, z, data={'P': p, col.TID: tid_concat, col.TIM:  tim_concat,
+                                                 'radius': r})
 
 if __name__ == "__main__":
     mfx = MfxData("C:/Users/apoliti/Desktop/mfluxtest/data/220309_VGlut_paint_2nM_3DMINFLUX_16p_PH0_6_05b.msr")
@@ -330,6 +383,11 @@ if __name__ == "__main__":
 
     regis = mfx.get_ref_transform()
     out_dic = mfx.align_to_ref()
-    mfx.export_mat(out_dic)
-    mfx.export_ref_mat()
-    mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT], save=True, show=False)
+    mfx.export_vtu(out_dic, col.LOC, "C:/Users/apoliti/Desktop/TMP/points_loc")
+    mfx.export_vtu(out_dic, col.LTR, "C:/Users/apoliti/Desktop/TMP/points_ltr")
+    mfx.export_vtu(out_dic, col.LRE, "C:/Users/apoliti/Desktop/TMP/points_lre")
+
+    mfx.export_numpy(out_dic)
+    #mfx.export_mat(out_dic)
+    #mfx.export_ref_mat()
+    #mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT], save=True, show=False)
