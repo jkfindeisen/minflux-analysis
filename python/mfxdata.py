@@ -17,6 +17,7 @@ from matplotlib import pyplot as plt
 import warnings
 from evtk import hl
 import mfxcolnames as col
+import re
 
 class MfxData:
     MAX_TDIFF_REF = 10    # time difference between final record of ref (beads) and mfx recording in sec.
@@ -34,7 +35,7 @@ class MfxData:
     TRANS = 'translate'
     ROT = 'rotate'
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, outdir_main = None):
         if not os.path.exists(file_path):
             raise OSError(file_path + " file does not exist!")
         self.msrfile_path = file_path
@@ -42,16 +43,16 @@ class MfxData:
         self.msrfile_name = os.path.splitext(os.path.basename(self.msrfile_path))[0]
         # These are default values that can be overwritten
 
-        self.outdir = self.get_outdir(self.msrfile_path)
+        self.outdir = self.get_outdir(self.msrfile_path, outdir_main)
         self.zarrdir = self.get_zarrdir(self.outdir, self.msrfile_path)
 
 
     @staticmethod
-    def get_outdir(msrfile):
-        filepath = os.path.dirname(msrfile)
+    def get_outdir(msrfile, filepath = None):
+        if filepath == None:
+            filepath = os.path.dirname(msrfile)
         filename = os.path.splitext(os.path.basename(msrfile))[0]
         # These are default values that can be overwritten
-
         return os.path.join(filepath, filename)
 
     @staticmethod
@@ -60,14 +61,12 @@ class MfxData:
         mf_data_sets = afile.minflux_data_sets()
         zarrdir = {mf['label']: os.path.join(outdir, mf['label']) for mf in mf_data_sets}
         # Sort assuming that order of acquisition is reflected in name
-        zarrdir = dict(sorted(zarrdir.items()))
+        zarrdir = dict(sorted(zarrdir.items(),  key=lambda x: int(re.search(r'\d+$',x[0]).group())))
         return zarrdir
 
-    def zarr_export(self):
+    def __zarr_export(self):
         """
-        Export mfx msr file to zarr files if data does not exist yet.
-        :param zarrdir: A dictionary containing per label the path to export the msr file
-        :param msrfile: path of msrfile
+        Exports mfx msr file to zarr files if data does not exist yet.
         :return: None
         """
         afile = specpy.File(self.msrfile_path, File.Read)
@@ -77,24 +76,22 @@ class MfxData:
 
     def zarr_import(self, force=False):
         """
-        Import zarr files located in self.zarrdir if no data has been loaded yet
+        Import zarr files located in self.zarrdir if no data has been loaded yet. Eventually create zarr data structure
         :param zarrdir: A dictionary containing per label the path to import the msr file
         :param msrfile: path of msrfile
         :param force: force import
         """
-
         # check that zarr files exist and eventually export
         for label, adir in self.zarrdir.items():
             if not os.path.exists(adir):
-                self.zarr_export()
+                print('Create Zarr data structure')
+                self.__zarr_export()
 
         if len(self.ref_all) == 0 or len(self.mfx_all) == 0 or force:
             for label, adir in self.zarrdir.items():
                 zarr_data = zarr.open(store=os.path.join(adir, 'zarr'), mode='r')
                 self.ref_all[label] = zarr_data.grd.mbm
                 self.mfx_all[label] = zarr_data.mfx
-
-
 
     def set_valid_ref(self, force=False):
         """
