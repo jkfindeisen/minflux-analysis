@@ -207,7 +207,7 @@ class ProcessLocalizations:
         summary = {}
         for label in self.loc:
             summary[label] = {col.TID2: [], col.LTR:[], col.STD: [], col.SE: [], col.NL: [],
-                       col.STD_XYZ: [], col.SE_XYZ: [],  col.CLS_MEAS: [], col.CLS_ALL: []}
+                              col.STD_XYZ: [], col.SE_XYZ: [],  col.CLS_MEAS: [], col.CLS_ALL: []}
             uid, idxs, counts = np.unique(self.loc[label][col.TID2], return_index=True, return_counts=True)
             for i, idx in enumerate(idxs):
                 if uid[i] == -1: # do not add non-valid localizations
@@ -221,7 +221,6 @@ class ProcessLocalizations:
                 std = np.sqrt(np.mean(var_xyz))
                 se = std/np.sqrt(nl)
                 mean_pos = np.mean(self.loc[label][col.LTR][tid_idxs], axis=0)
-
                 summary[label][col.LTR].append(mean_pos.tolist())
                 summary[label][col.STD].append(std)
                 summary[label][col.SE].append(se)
@@ -233,7 +232,6 @@ class ProcessLocalizations:
                 summary[label][col.CLS_MEAS].append(self.loc[label][col.CLS_MEAS][tid_idxs[0]])
                 summary[label][col.CLS_ALL].append(self.loc[label][col.CLS_ALL][tid_idxs[0]])
         return summary
-
 
     def bayes_gmm(self, x, std_limit=0):
         x = x/1e-9 # rescale in nm to simplify the fit

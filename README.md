@@ -84,13 +84,16 @@ Impsector comes with python libraries for the handling of the files.
 specpy is located at `C:\Imspector\Versions\IDOFIMSPECTORVERSION\python\PythonVersion-NumpyVersion`
 e.g. `C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\Python3.9.2-NumPy1.20.1`
 create environment with appropriate python version
-`conda create -n imspector-env python=3.9.2
+
+```
+conda create -n imspector-env python=3.9.2
 conda activate imspector
 cd C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\Python3.9.2-NumPy1.20.1
-pip install specpy-1.2.3-cp39-cp39-win_amd64.whl`
+pip install specpy-1.2.3-cp39-cp39-win_amd64.whl
+```
 
 
-load a msr 
+## load a msr 
 `file=specpy.File("name.msr")` 
 list the contained Minflux data sets (see dir() for the respective functions, they should be recognizable by name). 
 Then, use unpack() to extract the data as a zarr to disk. 
@@ -102,5 +105,51 @@ The names of the beads that were used for the lnc->loc conversion are stored as 
 You access the bead positions via the Zarr archive in the data directory (usually C:\Data\<data uid>\zarr) 
 while the measurement is open in Imspector. Within the archive structure, their localization data 
 is stored at /grd/mbm/R<nn>.
+
+
+# Python install instructions
+
+Create a working environment. Replace `my-env` with the name of your environment.
+
+```
+conda create -n my-env python=3.9 
+conda activate my-env
+```
+
+Tools for the data processing
+
+```
+conda install -c conda-forge scikit-learn 
+conda install -c conda-forge numpy
+conda install -c conda-forge matplotlib
+```
+
+Imspector specific package
+
+```
+cd C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\Python3.9.2-NumPy1.20.1
+pip install specpy-1.2.3-cp39-cp39-win_amd64.whl
+```
+
+Zarr data handling
+```
+conda install -c conda-forge zarr
+```
+
+VTK stuff
+```
+conda install -c conda-forge vtk
+conda install -c conda-forge pyevtk
+```
+
+Jupyter embedding
+```
+conda install ipykernel
+```
+
+Go to the directory containing the code. Start a anacondo prompt and 
+```
+jupyter notebook
+```
 
 

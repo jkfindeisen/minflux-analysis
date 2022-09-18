@@ -17,24 +17,25 @@ from matplotlib import pyplot as plt
 import warnings
 from evtk import hl
 import mfxcolnames as col
+import re
+import time
+
 
 class MfxData:
+    # class variable shared by all instances
     MAX_TDIFF_REF = 10    # time difference between final record of ref (beads) and mfx recording in sec.
     CORRECT_Z_POSITION_FACTOR = 0.7 # Correction due to oil water RI difference
     CORRECT_Z_POSITION_FACTOR_REF = 0.7
-
-    ref_all = {}          # stores ref beads
-    mfx_all = {}          # stores mfx measurements all washes
-    valid_ref_beads = {}  # Beads recording that fulfill minimal requirements
-    maxtime_ref_beads = {}  # Consensus max time between reference beads recording. Mfx recording is cropped accordingly
-    msrfile_path = None
-    msrfile_name = None
-    outdir = None
-    zarrdir = None
     TRANS = 'translate'
     ROT = 'rotate'
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, outdir_main=None, zarr_dir_main=None):
+        # instance variables
+        self.ref_all = {}          # stores ref beads
+        self.mfx_all = {}          # stores mfx measurements all washes
+        self.valid_ref_beads = {}  # Beads recording that fulfill minimal requirements
+        self.maxtime_ref_beads = {}  # Consensus max time between reference beads recording. Mfx recording is cropped accordingly
+
         if not os.path.exists(file_path):
             raise OSError(file_path + " file does not exist!")
         self.msrfile_path = file_path
@@ -42,16 +43,23 @@ class MfxData:
         self.msrfile_name = os.path.splitext(os.path.basename(self.msrfile_path))[0]
         # These are default values that can be overwritten
 
-        self.outdir = self.get_outdir(self.msrfile_path)
-        self.zarrdir = self.get_zarrdir(self.outdir, self.msrfile_path)
+        self.outdir = self.get_outdir(self.msrfile_path, outdir_main)
+        # Local directory performs 10x faster than network connection/ Staging on a local directory may be better
+        if zarr_dir_main is None:
+            zarr_dir_main = self.outdir
+        else:
+            zarr_dir_main = self.get_outdir(self.msrfile_path, zarr_dir_main)
+        self.zarrdir = self.get_zarrdir(outdir=zarr_dir_main, msrfile=self.msrfile_path)
+        if not os.path.exists(self.outdir):
+            os.makedirs(self.outdir)
 
 
     @staticmethod
-    def get_outdir(msrfile):
-        filepath = os.path.dirname(msrfile)
+    def get_outdir(msrfile, filepath = None):
+        if filepath == None:
+            filepath = os.path.dirname(msrfile)
         filename = os.path.splitext(os.path.basename(msrfile))[0]
         # These are default values that can be overwritten
-
         return os.path.join(filepath, filename)
 
     @staticmethod
@@ -60,14 +68,12 @@ class MfxData:
         mf_data_sets = afile.minflux_data_sets()
         zarrdir = {mf['label']: os.path.join(outdir, mf['label']) for mf in mf_data_sets}
         # Sort assuming that order of acquisition is reflected in name
-        zarrdir = dict(sorted(zarrdir.items()))
+        zarrdir = dict(sorted(zarrdir.items(),  key=lambda x: int(re.search(r'\d+$', x[0]).group())))
         return zarrdir
 
-    def zarr_export(self):
+    def __zarr_export(self):
         """
-        Export mfx msr file to zarr files if data does not exist yet.
-        :param zarrdir: A dictionary containing per label the path to export the msr file
-        :param msrfile: path of msrfile
+        Exports mfx msr file to zarr files if data does not exist yet.
         :return: None
         """
         afile = specpy.File(self.msrfile_path, File.Read)
@@ -77,24 +83,22 @@ class MfxData:
 
     def zarr_import(self, force=False):
         """
-        Import zarr files located in self.zarrdir if no data has been loaded yet
-        :param zarrdir: A dictionary containing per label the path to import the msr file
-        :param msrfile: path of msrfile
+        Import zarr files located in self.zarrdir if no data has been loaded yet. Eventually create zarr data structure
         :param force: force import
         """
-
         # check that zarr files exist and eventually export
         for label, adir in self.zarrdir.items():
             if not os.path.exists(adir):
-                self.zarr_export()
+                print('Create Zarr data structure')
+                self.__zarr_export()
 
         if len(self.ref_all) == 0 or len(self.mfx_all) == 0 or force:
             for label, adir in self.zarrdir.items():
-                zarr_data = zarr.open(store=os.path.join(adir, 'zarr'), mode='r')
-                self.ref_all[label] = zarr_data.grd.mbm
-                self.mfx_all[label] = zarr_data.mfx
-
-
+                dir_store1 = zarr.DirectoryStore(os.path.join(adir, 'zarr'))
+                cache1 = zarr.LRUStoreCache(store=dir_store1, max_size=2**100)
+                self.ref_all[label] = zarr.open(store=cache1, mode='r',  path='grd/mbm/')
+                self.mfx_all[label] = zarr.open(store=cache1, mode='r', path='mfx')
+                #self.ref_all[label] = zarr.open(store=os.path.join(adir, 'zarr'), mode='r', path='grd/mbm/')
 
     def set_valid_ref(self, force=False):
         """
@@ -102,10 +106,8 @@ class MfxData:
         internal variable will be set in this function
         :param force: force import
         """
-        # TODO When unequal number of references find consensus
-        self.zarr_import()
         valid_ref_beads = {}
-        if force or len(self.valid_ref_beads) > 0:
+        if not force and len(self.valid_ref_beads) > 0:
             return
         for label in self.ref_all:
             ref = self.ref_all[label]
@@ -132,6 +134,7 @@ class MfxData:
         """
         Extract the positions of valid beads, concatenate those for all directories
         :return: a list with time_vector, pos_array of all beads, std in time in case there is a jump in the recording
+        pos_array[time, bead, axes]
         """
         self.set_valid_ref()
         pos_array = []
@@ -170,11 +173,17 @@ class MfxData:
         :param pos_array:
         :return: the metric
         """
-        # Compute error in bead position now just std
+        # Compute error in bead position, this is the mean in all directions. This is the best fit of a symmetric gaussian
+        # Alternatively one could compute the norm, which is the highest possible error!
+        # The standard error is truly the error of the centroid ??
 
-        std = [np.std(pos_array[:, :, ax], axis=0) for ax in [0, 1, 2]]
-        return {'ste': np.mean(np.linalg.norm(std, axis=1)) / math.sqrt(len(std)),
-                'std': np.mean(np.linalg.norm(std, axis=1))}
+        std = [np.std(pos_array[:, :, ax], axis=0) for ax in range(0, 3)]
+        std_m = np.mean(std, axis=1)
+        # std[axis_dimension, bead_id]
+        return {'se_xy': np.sqrt((std_m[0]**2 + std_m[1]**2)/2)/ math.sqrt(np.shape(std)[1]),
+                'se_z': std_m[2]/math.sqrt(np.shape(std)[1]),
+                'std_xy': np.sqrt((std_m[0]**2 + std_m[1]**2)/2),
+                'std_z': std_m[2]}
 
     def get_ref_transform(self):
         """
@@ -234,7 +243,10 @@ class MfxData:
             if rotate is not None:
                 pos_array_translate_rotate[:, idx] = self.apply_ref_transform(translate, rotate, pos_array[:, idx],
                                                                               time_vector)
-        titles = ['Unregistered, std (nm) %.2f, se (nm) %.2f\n', 'Translate, std (nm) %.2f, se (nm) %.2f\n', 'Translate + rotate, std (nm) %.2f, se (nm) %.2f\n']
+        titles = ['Unregistered (nm), std_xy %.2f, std_z  %.2f\nse_xy %.2f, se_z %.2f\n',
+                  'Translate, std_xy %.2f, std_z  %.2f\nse_xy %.2f, se_z %.2f\n',
+                  'Translate + rotate, std_xy %.2f, std_z  %.2f\nse_xy %.2f, se_z %.2f\n']
+
         if rotate is None:
             obj_to_plot = [pos_array, pos_array_translate]
         else:
@@ -248,15 +260,18 @@ class MfxData:
             for idx in range(pos_array.shape[1]):
                 for iobj in range(len(obj_to_plot)):
                     ax[iobj].plot(time_vector, obj_to_plot[iobj][:, idx, ax_idx] -
-                                 obj_to_plot[iobj][0, idx, ax_idx], label=self.valid_ref_beads[idx])
+                                  obj_to_plot[iobj][0, idx, ax_idx], label=self.valid_ref_beads[idx])
             ax[0].legend(fontsize=8)
             ax[0].set_ylabel(labels[ax_idx])
 
 
         ref_error = [self.compute_ref_transform_error(obj) for obj in obj_to_plot]
         for iobj in range(len(obj_to_plot)):
-            axs[0][iobj].set_title(titles[iobj] % (ref_error[iobj]['std'] * math.pow(10, 9),
-                                                   ref_error[iobj]['ste'] * math.pow(10, 9)), fontsize=8)
+            axs[0][iobj].set_title(titles[iobj] % (ref_error[iobj]['std_xy'] * math.pow(10, 9),
+                                                   ref_error[iobj]['std_z'] * math.pow(10, 9),
+                                                   ref_error[iobj]['se_xy'] * math.pow(10, 9),
+                                                   ref_error[iobj]['se_z'] * math.pow(10, 9)
+                                                   ), fontsize=8)
             axs[2][iobj].set_xlabel('time (sec)')
         if save:
             plt.savefig(os.path.join(self.outdir, self.msrfile_name + "_ref_drift.png"))
@@ -274,7 +289,7 @@ class MfxData:
             lnc_nv = obj[col.ITR][col.LNC][~obj[col.VLD]]
             lnc_nv = lnc_nv[:, -1]
             print("Localizations in invalid tracks %s %d/%d" % (label, len(lnc_nv[~np.isnan(lnc_nv[:, 0]), 0]),
-                                                                       len(lnc_nv[np.isnan(lnc_nv[:,0]), 0])))
+                                                                len(lnc_nv[np.isnan(lnc_nv[:,0]), 0])))
             lnc = obj[col.ITR][col.LNC][obj[col.VLD]]
             loc = obj[col.ITR][col.LOC][obj[col.VLD]]
             tim = obj[col.TIM][obj[col.VLD]]
@@ -373,21 +388,24 @@ class MfxData:
                                                  'radius': r})
 
 if __name__ == "__main__":
-    mfx = MfxData("C:/Users/apoliti/Desktop/mfluxtest/data/220309_VGlut_paint_2nM_3DMINFLUX_16p_PH0_6_05b.msr")
-    # different default output
-    mfx.outdir = os.path.join("C:/Users/apoliti/Desktop/mfluxtest/analysis", mfx.msrfile_name)
-    mfx.zarrdir = mfx.get_zarrdir(mfx.outdir, mfx.msrfile_path)
+    t0 = time.time()
+    loc_dir = 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/Syp_ATG9/'
+    glob_dir = 'Z:/siva_minflux/analysis/Multiwash/Syp_ATG9/'
+    mfx = MfxData('Z:/siva_minflux/data/Multiwash/Syp_ATG9/220601_Syp_ATG9_ROI01.msr',
+                  outdir_main=glob_dir, zarr_dir_main=loc_dir)
+    print(mfx.zarrdir)
 
     mfx.zarr_import()
     mfx.set_valid_ref()
-
+    print(mfx.valid_ref_beads)
     regis = mfx.get_ref_transform()
-    out_dic = mfx.align_to_ref()
-    mfx.export_vtu(out_dic, col.LOC, "C:/Users/apoliti/Desktop/TMP/points_loc")
-    mfx.export_vtu(out_dic, col.LTR, "C:/Users/apoliti/Desktop/TMP/points_ltr")
-    mfx.export_vtu(out_dic, col.LRE, "C:/Users/apoliti/Desktop/TMP/points_lre")
-
-    mfx.export_numpy(out_dic)
+    #out_dic = mfx.align_to_ref()
+    print("Time elapsed: ",  time.time() - t0)
+    #mfx.export_vtu(out_dic, col.LOC, "C:/Users/apoliti/Desktop/TMP/points_loc")
+    #mfx.export_vtu(out_dic, col.LTR, "C:/Users/apoliti/Desktop/TMP/points_ltr")
+    #mfx.export_vtu(out_dic, col.LRE, "C:/Users/apoliti/Desktop/TMP/points_lre")
+    mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT], save=False, show=True)
+    #mfx.export_numpy(out_dic)
     #mfx.export_mat(out_dic)
     #mfx.export_ref_mat()
-    #mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT], save=True, show=False)
+    #
