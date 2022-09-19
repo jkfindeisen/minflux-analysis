@@ -19,6 +19,7 @@ from evtk import hl
 import mfxcolnames as col
 import re
 import time
+from scipy.spatial import distance_matrix
 
 
 class MfxData:
@@ -28,6 +29,7 @@ class MfxData:
     CORRECT_Z_POSITION_FACTOR_REF = 0.7
     TRANS = 'translate'
     ROT = 'rotate'
+    LOAD_ZARR_IN_MEMORY = True
 
     def __init__(self, file_path, outdir_main=None, zarr_dir_main=None):
         # instance variables
@@ -35,7 +37,7 @@ class MfxData:
         self.mfx_all = {}          # stores mfx measurements all washes
         self.valid_ref_beads = {}  # Beads recording that fulfill minimal requirements
         self.maxtime_ref_beads = {}  # Consensus max time between reference beads recording. Mfx recording is cropped accordingly
-
+        self.mintime_ref_beads = {}
         if not os.path.exists(file_path):
             raise OSError(file_path + " file does not exist!")
         self.msrfile_path = file_path
@@ -86,6 +88,7 @@ class MfxData:
         Import zarr files located in self.zarrdir if no data has been loaded yet. Eventually create zarr data structure
         :param force: force import
         """
+
         # check that zarr files exist and eventually export
         for label, adir in self.zarrdir.items():
             if not os.path.exists(adir):
@@ -95,10 +98,15 @@ class MfxData:
         if len(self.ref_all) == 0 or len(self.mfx_all) == 0 or force:
             for label, adir in self.zarrdir.items():
                 dir_store1 = zarr.DirectoryStore(os.path.join(adir, 'zarr'))
-                cache1 = zarr.LRUStoreCache(store=dir_store1, max_size=2**100)
-                self.ref_all[label] = zarr.open(store=cache1, mode='r',  path='grd/mbm/')
-                self.mfx_all[label] = zarr.open(store=cache1, mode='r', path='mfx')
-                #self.ref_all[label] = zarr.open(store=os.path.join(adir, 'zarr'), mode='r', path='grd/mbm/')
+                # dirr_store1.rename(src_dir=..., dst_dir=...) to change name of directory
+                cache1 = zarr.LRUStoreCache(store=dir_store1, max_size=2**28)
+                if self.LOAD_ZARR_IN_MEMORY:
+                    # Does not seem to make a difference in speed
+                    self.ref_all[label] = zarr.load(store=cache1, path='grd/mbm/')
+                    self.mfx_all[label] = zarr.load(store=cache1, path='mfx')
+                else:
+                    self.ref_all[label] = zarr.open(store=cache1, mode='r',  path='grd/mbm/')
+                    self.mfx_all[label] = zarr.open(store=cache1, mode='r', path='mfx')
 
     def set_valid_ref(self, force=False):
         """
@@ -106,6 +114,7 @@ class MfxData:
         internal variable will be set in this function
         :param force: force import
         """
+        # TODO: Create a match beads functionality if names are different
         valid_ref_beads = {}
         if not force and len(self.valid_ref_beads) > 0:
             return
@@ -125,6 +134,7 @@ class MfxData:
             valid_ref_beads[label] = vld
         # Match the beads in the different washes
         keys = list(valid_ref_beads)
+
         vld_ref_all = valid_ref_beads[keys[0]]
         for i in range(1, len(keys)):
             vld_ref_all = [x for x in vld_ref_all if x in valid_ref_beads[keys[i]]]
@@ -136,6 +146,7 @@ class MfxData:
         :return: a list with time_vector, pos_array of all beads, std in time in case there is a jump in the recording
         pos_array[time, bead, axes]
         """
+        # TODO: Add dynamic time warping to match correctly the different recordings from all beads.
         self.set_valid_ref()
         pos_array = []
         time_vector = []
@@ -150,9 +161,11 @@ class MfxData:
             else:
                 n_el = n_el[0]
             # Average time through the measurements of each round
+            # Rough find time shift between
             time_stack = np.stack([self.ref_all[label][b][col.TIM][:n_el] for b in self.valid_ref_beads], axis=1)
             time_mean = np.mean(time_stack, axis=1)
             self.maxtime_ref_beads[label] = time_mean[-1] # CONSISTENCY!
+            self.mintime_ref_beads[label] = time_mean[0]
             time_vector.append(time_mean)
             time_std_vector.append(np.std(time_stack, axis=1))
             pos_array.append(np.stack([self.ref_all[label][b][col.POS][:n_el] for b in self.valid_ref_beads], axis=1))
@@ -296,7 +309,7 @@ class MfxData:
             tid = obj[col.TID][obj[col.VLD]]
             vld = obj[col.VLD][obj[col.VLD]]
             # further trim for time ref_beads
-            tim_trim = tim < self.maxtime_ref_beads[label]
+            tim_trim = (tim > self.mintime_ref_beads[label]) * (tim < self.maxtime_ref_beads[label])
             lnc = lnc[tim_trim]
             loc = loc[tim_trim]
             tim = tim[tim_trim]
@@ -389,22 +402,48 @@ class MfxData:
 
 if __name__ == "__main__":
     t0 = time.time()
-    loc_dir = 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/Syp_ATG9/'
-    glob_dir = 'Z:/siva_minflux/analysis/Multiwash/Syp_ATG9/'
-    mfx = MfxData('Z:/siva_minflux/data/Multiwash/Syp_ATG9/220601_Syp_ATG9_ROI01.msr',
-                  outdir_main=glob_dir, zarr_dir_main=loc_dir)
-    print(mfx.zarrdir)
+    loc_dir = 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/VGLUT1_VGLUT1/'
+    glob_dir = 'Z:/siva_minflux/analysis/Multiwash/VGLUT1_VGLUT1/'
+    mfx = MfxData('Z:/siva_minflux/data/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01_First.msr',
+                   outdir_main=glob_dir, zarr_dir_main=loc_dir)
 
+    # Example of workaround for not merged msr file
+    mfx.zarrdir = {'220811_VGLUT1_P1': 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01/220811_VGLUT1_P1',
+                    '220811_VGLUT1_P2': 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01/220811_VGLUT1_P2'}
     mfx.zarr_import()
     mfx.set_valid_ref()
-    print(mfx.valid_ref_beads)
     regis = mfx.get_ref_transform()
+    mfx.show_ref_transform(regis[mfx.TRANS], rotate=None, save=False, show=True)
+
+    #mfx1.MAX_TDIFF_REF = 10
+    #mfx2 = MfxData('Z:/siva_minflux/data/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01_Second.msr',
+    #                outdir_main=glob_dir, zarr_dir_main=loc_dir)
+    #mfx2.MAX_TDIFF_REF = 10
+
+    #mfx1.zarr_import()
+    #mfx2.zarr_import()
+    #mfx1.set_valid_ref()
+    #mfx2.set_valid_ref()
+
+    # Match beads stump code
+
+    #[time_vector, pos_array1, time_std_vector] = mfx1.get_ref()
+    #[time_vector, pos_array2, time_std_vector] = mfx2.get_ref()
+    #mat_dd = distance_matrix(pos_array1[0], pos_array2[0])*1e9
+    #match_beads = list()
+    #max_beads_dist = 150
+    #for idx in range(0, len(mfx1.valid_ref_beads)):
+    #    if any(mat_dd[idx] < max_beads_dist):
+    #        match_beads.append([mfx1.valid_ref_beads[idx],
+    #                            mfx2.valid_ref_beads[np.where(mat_dd[idx] < max_beads_dist)[0][0]]])
+
     #out_dic = mfx.align_to_ref()
-    print("Time elapsed: ",  time.time() - t0)
+
+    #print("Time elapsed: ",  time.time() - t0)
     #mfx.export_vtu(out_dic, col.LOC, "C:/Users/apoliti/Desktop/TMP/points_loc")
     #mfx.export_vtu(out_dic, col.LTR, "C:/Users/apoliti/Desktop/TMP/points_ltr")
     #mfx.export_vtu(out_dic, col.LRE, "C:/Users/apoliti/Desktop/TMP/points_lre")
-    mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT], save=False, show=True)
+    #mfx.show_ref_transform(regis[mfx.TRANS], rotate=None, save=False, show=True)
     #mfx.export_numpy(out_dic)
     #mfx.export_mat(out_dic)
     #mfx.export_ref_mat()
