@@ -6,7 +6,9 @@ VLD = 'vld'             # Valid recording
 TID = 'tid'             # track ID
 TIM = 'tim'             # time of recording
 ITR = 'itr'             # iteration object
-POS = 'pos'             # coordinate for reference beads
+POS = 'pos'             # coordinate for reference beads, for zarr grd/mdm
+ECO = 'eco'             # Effective counts periphery
+EFO = 'efo'             # Effective frequency periphery (outliers with more than one fluorophore blinking may show higher values here)
 
 # Additional columns added to the data
 
