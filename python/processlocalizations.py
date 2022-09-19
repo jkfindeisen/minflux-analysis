@@ -19,8 +19,8 @@ class ProcessLocalizations:
     MIN_LOCALIZATIONS = 4           # Minimum number of localizations pre track
     MIN_SPLIT_LOCALIZATIONS = 2*MIN_LOCALIZATIONS    # Perform analysis and split eventually localizations with more than 8
     DBCLUSTER_EPS_TRACK = 2e-8    # 1e-8 = 10 nm, eps for clustering localization of a single track
-    DBCLUSTER_EPS_MEAS = 3e-8     # eps for clustering localization of all localization in one measurement
-    DBCLUSTER_EPS_ALL = 3e-8      # eps for clustering localization of all localization in all measurement
+    DBCLUSTER_EPS_MEAS = 2e-8     # eps for clustering localization of all localization in one measurement
+    DBCLUSTER_EPS_ALL = 2e-8      # eps for clustering localization of all localization in all measurement
     DBCLUSTER_SIZE = 4
     STD_QUANTILE = 0.75           # STD quantile for further processing TID and split those
 
@@ -159,6 +159,8 @@ class ProcessLocalizations:
         for label in self.loc:
             uid = np.unique(self.loc[label][col.TID2])
             uid_cls = np.unique(self.loc[label][col.CLS_MEAS])
+            uid_cls = uid_cls[uid_cls >= 0]
+            uid = uid[uid >=0 ]
             print('*******cluster_meas*******\n%s, Method %s, eps: %.2f nm\nTotal tracks TID2: %d, total clusters meas: %d'
                   % (label, method, self.DBCLUSTER_EPS_MEAS*1e9, len(uid), len(uid_cls)))
 
@@ -184,33 +186,53 @@ class ProcessLocalizations:
         for label in self.loc:
             uid_cls = np.unique(self.loc[label][col.CLS_ALL])
             uid_tid = np.unique(self.loc[label][col.TID2])
+            uid_cls = uid_cls[uid_cls >= 0]
+            uid_tid = uid_tid[uid_tid >= 0]
             print('*******cluster_all*******\n%s, Method: %s, eps: %.2f nm' % (label, method, self.DBCLUSTER_EPS_ALL*1e9))
             print('Total tracks TID2: %d, total cluster all: %d' % (len(uid_tid), len(uid_cls)))
 
     def cluster_all_intersect(self):
         # TODO: Generalize for more than 2 washes
         keys = list(self.loc.keys())
-        uid_P1 = np.unique(self.loc[keys[0]][col.CLS_ALL])
-        uid_P2 = np.unique(self.loc[keys[1]][col.CLS_ALL])
-        uid_P1 = uid_P1[uid_P1 >= 0]
-        uid_P2 = uid_P2[uid_P2 >= 0]
+        uid_P = [np.unique(self.loc[keys[0]][col.CLS_ALL]), np.unique(self.loc[keys[1]][col.CLS_ALL])]
+        uid_P = [ui[ui > 0] for ui in uid_P]
 
-        intersect = np.intersect1d(uid_P1, uid_P2)
+
+        # these are the intersected joint clusters
+        intersect = np.intersect1d(uid_P[0], uid_P[1])
+
+        # count TID2 per each value intersect cluster
+        tid2_intersect = []
+        tid2_total = []
+        for key in keys:
+            idx_intersect = [cls in intersect for cls in self.loc[key][col.CLS_ALL]]
+            tid2_intersect.append(np.unique(self.loc[key][col.TID2][idx_intersect]))
+            tmp = np.unique(self.loc[key][col.TID2])
+            tid2_total.append(tmp[tmp >= 0])
+
         print('*******cluster_all_intersect*******')
-        print('%s cluster with %s %d/%d = %.2f\n%s cluster with %s %d/%d = %.2f\n' % (keys[0], keys[1], len(intersect), len(uid_P1), len(intersect)/ len(uid_P1),
-                                                                        keys[1], keys[0], len(intersect), len(uid_P2), len(intersect)/ len(uid_P2)))
+        for idx in range(0, 2):
+            k_idx1 = 0
+            k_idx2 = 1
+            if idx == 1:
+                k_idx1 = 1
+                k_idx2 = 0
+            print('%s cluster with %s cls %d/%d = %.2f; TID2 %d/%d = %.2f' %
+                  (keys[k_idx1], keys[k_idx2], len(intersect), len(uid_P[idx]), len(intersect)/len(uid_P[idx]),
+                   len(tid2_intersect[idx]), len(tid2_total[idx]), len(tid2_intersect[idx])/len(tid2_total[idx])))
 
     def inter_cluster_cleanup(self, column_cls):
         # Loop through the data set and perform a majority voting
         # Each track can only belong to one cluster
-        # Remove -1 entries
+        # Care for TID2 == -1 values
+
         for label in self.loc:
             uid, idxs, counts = np.unique(self.loc[label][col.TID2], return_index=True, return_counts=True)
 
             for i, idx in enumerate(idxs):
                 if uid[i] == -1:
                     continue
-                tid_idxs = range(idx, idx+counts[i])
+                tid_idxs = (self.loc[label][col.TID2] == uid[i])
                 u_cls, idx_cls, counts_cls = np.unique(self.loc[label][column_cls][tid_idxs],
                                                        return_index=True, return_counts=True)
                 if len(u_cls) == 1:
@@ -292,9 +314,10 @@ class ProcessLocalizations:
         return pr
 
     def summary_per_tid2(self):
+        # TODO: perform additional clustering from average distrubtion
         summary = {}
         for label in self.loc:
-            summary[label] = {col.TID2: [],  col.LTR: [], col.STD: [], col.SE: [], col.NL: [],
+            summary[label] = {col.TID2: [], col.TIM: [], col.LTR: [], col.STD: [], col.SE: [], col.NL: [],
                               col.STD_XYZ: [], col.SE_XYZ: [],  col.CLS_MEAS: [], col.CLS_ALL: []}
             uid, idxs, counts = np.unique(self.loc[label][col.TID2], return_index=True, return_counts=True)
             for i, idx in enumerate(idxs):
@@ -308,7 +331,9 @@ class ProcessLocalizations:
                 se_xyz = std_xyz/np.sqrt(nl)
                 std = np.sqrt(np.mean(var_xyz))
                 se = std/np.sqrt(nl)
+                mean_time = np.mean(self.loc[label][col.TIM][tid_idxs])
                 mean_pos = np.mean(self.loc[label][col.LTR][tid_idxs], axis=0)
+                summary[label][col.TIM].append(mean_time)
                 summary[label][col.LTR].append(mean_pos.tolist())
                 summary[label][col.STD].append(std)
                 summary[label][col.SE].append(se)
@@ -328,43 +353,44 @@ class ProcessLocalizations:
 
         pos_concat = np.concatenate([out_dict[d][lcoord] for d in out_dict])
         tid_concat = np.concatenate([out_dict[d][col.TID2] for d in out_dict])
-        #tim_concat = np.concatenate([out_dict[d][col.TIM] for d in out_dict])
+        tim_concat = np.concatenate([out_dict[d][col.TIM] for d in out_dict])
         cls_all = np.concatenate([out_dict[d][col.CLS_ALL] for d in out_dict])
         cls_meas = np.concatenate([out_dict[d][col.CLS_MEAS] for d in out_dict])
-        se_xyz = np.concatenate([out_dict[d][col.SE_XYZ] for d in out_dict])
+        se = np.concatenate([out_dict[d][col.SE] for d in out_dict])
+        nl = np.concatenate([out_dict[d][col.NL] for d in out_dict])
 
         # concatenate positions
         x = np.ascontiguousarray(pos_concat[:, 0], dtype = np.float64)
         y = np.ascontiguousarray(pos_concat[:, 1], dtype = np.float64)
         z = np.ascontiguousarray(pos_concat[:, 2], dtype = np.float64)
-        se_xyz = np.ascontiguousarray(se_xyz)
+        #se_xyz = np.ascontiguousarray(se_xyz)
 
         keys = list(out_dict.keys())
-        p = np.repeat(keys, [len(out_dict[k][lcoord]) for k in keys])
-        # hl.pointsToVTK(file_path, x, y, z, data={'wash': p, col.TID2: tid_concat,
-        #                                           col.CLS_ALL: cls_all,
-        #                                           col.CLS_MEAS: cls_meas,
-        #                                           col.SE_XYZ: se_xyz})
-        hl.pointsToVTK(file_path, x, y, z, data={'wash': p})
+        lp1_p2 = [len(out_dict[k][lcoord]) for k in keys]
+        p = np.repeat(range(1, len(keys)+1), [len(out_dict[k][lcoord]) for k in keys])
+        # No string output
 
+        hl.pointsToVTK(file_path, x, y, z, data={'wash': p, col.TID2: tid_concat,
+                                                   col.CLS_ALL: cls_all,
+                                                   col.CLS_MEAS: cls_meas,
+                                                   col.SE: se/np.min(se),
+                                                   col.NL: nl, col.TIM: tim_concat
+                                                 })
+        for label in out_dict:
+            # concatenate positions
+            pos_concat = np.array(out_dict[label][lcoord])
+            x = np.ascontiguousarray(pos_concat[:, 0], dtype=np.float64)
+            y = np.ascontiguousarray(pos_concat[:, 1], dtype=np.float64)
+            z = np.ascontiguousarray(pos_concat[:, 2], dtype=np.float64)
 
-# def get_gmmpar(self, gmm, indata):
-    #     if gmm.covariance_type == "full":
-    #         covariances = gmm.covariances_
-    #     elif gmm.covariance_type == "tied":
-    #         covariances = gmm.covariances_[:2, :2]
-    #     elif gmm.covariance_type == "diag":
-    #         sd = np.sqrt(gmm.covariances_)
-    #         m = gmm.means_
-    #         v = None
-    #         return [m, v]
-    #     elif gmm.covariance_type == "spherical":
-    #         covariances = np.eye(gmm.means_.shape[1]) * gmm.covariances_
-    #     v, w = np.linalg.eigh(covariances)
-    #     u = w[0] / np.linalg.norm(w[0])
-    #     angle = np.arctan2(u[1], u[0])
-    #     angle = 180 * angle / np.pi  # convert to degrees
-    #     v = 2.0 * np.sqrt(2.0) * np.sqrt(v) # confidence interval ellipse
+            hl.pointsToVTK(file_path + label, x, y, z,
+                           data={col.TID2: np.array(out_dict[label][col.TID2]),
+                                 col.TIM: np.array(out_dict[label][col.TIM]),
+                                 col.SE: np.array(out_dict[label][col.SE]/np.min(se)),
+                                 col.NL: np.array(out_dict[label][col.NL]/np.min(nl)),
+                                 col.CLS_ALL: np.array(out_dict[label][col.CLS_ALL]),
+                                 col.CLS_MEAS: np.array(out_dict[label][col.CLS_MEAS])
+                                 })
 
 if __name__ == "__main__":
     os.environ["OMP_NUM_THREADS"] = '1'
