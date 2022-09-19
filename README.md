@@ -152,4 +152,10 @@ Go to the directory containing the code. Start a anacondo prompt and
 jupyter notebook
 ```
 
+# Number of photons
+R.S. email:
+`` For the first localization of a trace, you need the combined number of the “phtLimit” parameters (of all iterations of your sequence) as a lower limit for total detected photons. After the first localization succeeded, additional localizations require only as much photons as needed for iterations from “headstart” on to the final one.``
+
+the parameter 'phtLimit' and 'headstart' can be found in the zarr directory 'mfx/.zattrs'. 
+The 'headstart' is negative? The 'phtLimit' appears several time in the metadata with different values. 
 
