@@ -191,10 +191,10 @@ class ProcessLocalizations:
             print('*******cluster_all*******\n%s, Method: %s, eps: %.2f nm' % (label, method, self.DBCLUSTER_EPS_ALL*1e9))
             print('Total tracks TID2: %d, total cluster all: %d' % (len(uid_tid), len(uid_cls)))
 
-    def cluster_all_intersect(self):
+    def cluster_all_intersect(self, column):
         # TODO: Generalize for more than 2 washes
         keys = list(self.loc.keys())
-        uid_P = [np.unique(self.loc[keys[0]][col.CLS_ALL]), np.unique(self.loc[keys[1]][col.CLS_ALL])]
+        uid_P = [np.unique(self.loc[keys[0]][column]), np.unique(self.loc[keys[1]][column])]
         uid_P = [ui[ui > 0] for ui in uid_P]
 
 
@@ -205,7 +205,7 @@ class ProcessLocalizations:
         tid2_intersect = []
         tid2_total = []
         for key in keys:
-            idx_intersect = [cls in intersect for cls in self.loc[key][col.CLS_ALL]]
+            idx_intersect = [cls in intersect for cls in self.loc[key][column]]
             tid2_intersect.append(np.unique(self.loc[key][col.TID2][idx_intersect]))
             tmp = np.unique(self.loc[key][col.TID2])
             tid2_total.append(tmp[tmp >= 0])
@@ -254,8 +254,11 @@ class ProcessLocalizations:
                     self.loc[label][column_cls][tid_idxs] = cluster_id
                     cluster_id += 1
 
-    def dbscan(self, x, eps):
-        alg = cluster.DBSCAN(eps=eps, min_samples=self.DBCLUSTER_SIZE)
+    def dbscan(self, x, eps, min_samples=None):
+
+        if min_samples is None:
+            min_samples = self.DBCLUSTER_SIZE
+        alg = cluster.DBSCAN(eps=eps, min_samples=min_samples)
         alg.fit(x)
         pr = alg.labels_
         return pr
@@ -314,16 +317,17 @@ class ProcessLocalizations:
         return pr
 
     def summary_per_tid2(self):
-        # TODO: perform additional clustering from average distrubtion
         summary = {}
         for label in self.loc:
-            summary[label] = {col.TID2: [], col.TIM: [], col.LTR: [], col.STD: [], col.SE: [], col.NL: [],
-                              col.STD_XYZ: [], col.SE_XYZ: [],  col.CLS_MEAS: [], col.CLS_ALL: []}
+            summary[label] = {col.TID2: [], col.TIM: [], col.LOC: [], col.LNC: [], col.LTR: [], col.STD: [],
+                              col.SE: [], col.NL: [], col.STD_XYZ: [], col.SE_XYZ: [],  col.CLS_MEAS: [],
+                              col.CLS_ALL: [], col.CLS_TID2_MEAS: [], col.CLS_TID2_ALL: []}
             uid, idxs, counts = np.unique(self.loc[label][col.TID2], return_index=True, return_counts=True)
             for i, idx in enumerate(idxs):
-                if uid[i] == -1: # do not add non-valid localizations
+                # do not add non-valid localizations where the single track failed
+                if uid[i] == -1:
                     continue
-                tid_idxs = range(idx, idx+counts[i])
+                tid_idxs = (self.loc[label][col.TID2] == uid[i])
                 summary[label][col.TID2].append(uid[i])
                 nl = len(self.loc[label][col.LTR][tid_idxs])
                 var_xyz = np.var(self.loc[label][col.LTR][tid_idxs], axis=0)
@@ -334,21 +338,52 @@ class ProcessLocalizations:
                 mean_time = np.mean(self.loc[label][col.TIM][tid_idxs])
                 mean_pos = np.mean(self.loc[label][col.LTR][tid_idxs], axis=0)
                 summary[label][col.TIM].append(mean_time)
+                summary[label][col.LOC].append(np.mean(self.loc[label][col.LOC][tid_idxs], axis=0).tolist())
+                summary[label][col.LNC].append(np.mean(self.loc[label][col.LNC][tid_idxs], axis=0).tolist())
                 summary[label][col.LTR].append(mean_pos.tolist())
                 summary[label][col.STD].append(std)
                 summary[label][col.SE].append(se)
                 summary[label][col.NL].append(nl)
                 summary[label][col.STD_XYZ].append(std_xyz)
                 summary[label][col.SE_XYZ].append(se_xyz)
-                # track ID where clustering did not succeed
-                if self.loc[label][col.CLS_MEAS][tid_idxs[0]] < 0:
-                    print('CLS_MEAS failed for tif %d', self.loc[label][col.CLS_MEAS][tid_idxs])
-                summary[label][col.CLS_MEAS].append(self.loc[label][col.CLS_MEAS][tid_idxs[0]])
-                summary[label][col.CLS_ALL].append(self.loc[label][col.CLS_ALL][tid_idxs[0]])
+                summary[label][col.CLS_MEAS].append(self.loc[label][col.CLS_MEAS][tid_idxs][0])
+                summary[label][col.CLS_ALL].append(self.loc[label][col.CLS_ALL][tid_idxs][0])
+
+
+
+        # cluster single wash measurement at the level of merged localizations
+        for label in summary:
+            summary[label][col.CLS_TID2_MEAS] = self.dbscan(summary[label][col.LTR],
+                                                            eps=self.DBCLUSTER_EPS_MEAS, min_samples=1)
+
+        # cluster combined wash at the level of merged localizations
+        loc_all = np.concatenate([summary[label][col.LTR] for label in summary])
+        cls_idx = self.dbscan(loc_all, eps=self.DBCLUSTER_EPS_ALL, min_samples=1)
+        istart = 0
+        for label in summary:
+            iend = istart + len(summary[label][col.CLS_ALL])
+            summary[label][col.CLS_TID2_ALL] = cls_idx[range(istart, iend)]
+            istart = iend
         return summary
 
-    def export_vtu(self, lcoord, file_path):
-        out_dict = self.summary_per_tid2()
+    def export_table(self, out_dict):
+        dict1 = {'NAME': ['Samuel', 'Richie', 'Lauren'],
+                 'AGE': [21, 20, 21],
+                 'COURSE': ['Data Structures', 'Machine Learning', 'OOPS with Java']}
+
+        # print the contents using zip format.
+        for each_row in zip(*([i] + (j) for i, j in dict1.items())):
+
+            print(*each_row, " ")
+        print('export_table')
+        for label in out_dict:
+            for each_row in zip(*([i] + (j)
+                                  for i, j in out_dict[label].items())):
+
+                print(*each_row, " ")
+
+    def export_vtu(self, out_dict, lcoord, file_path):
+
         # export to vtk format for view in paraview, ideally also clustering etc.
 
         pos_concat = np.concatenate([out_dict[d][lcoord] for d in out_dict])
@@ -356,6 +391,8 @@ class ProcessLocalizations:
         tim_concat = np.concatenate([out_dict[d][col.TIM] for d in out_dict])
         cls_all = np.concatenate([out_dict[d][col.CLS_ALL] for d in out_dict])
         cls_meas = np.concatenate([out_dict[d][col.CLS_MEAS] for d in out_dict])
+        cls_tid2_meas = np.concatenate([out_dict[d][col.CLS_TID2_MEAS] for d in out_dict])
+        cls_tid2_all = np.concatenate([out_dict[d][col.CLS_TID2_ALL] for d in out_dict])
         se = np.concatenate([out_dict[d][col.SE] for d in out_dict])
         nl = np.concatenate([out_dict[d][col.NL] for d in out_dict])
 
@@ -370,11 +407,17 @@ class ProcessLocalizations:
         p = np.repeat(range(1, len(keys)+1), [len(out_dict[k][lcoord]) for k in keys])
         # No string output
 
-        hl.pointsToVTK(file_path, x, y, z, data={'wash': p, col.TID2: tid_concat,
-                                                   col.CLS_ALL: cls_all,
-                                                   col.CLS_MEAS: cls_meas,
-                                                   col.SE: se/np.min(se),
-                                                   col.NL: nl, col.TIM: tim_concat
+        hl.pointsToVTK(file_path + '_' + lcoord, x, y, z, data={'wash': p,
+                                                 col.TID2: tid_concat,
+                                                 col.TIM: tim_concat,
+                                                 col.SE: se,
+                                                 'se_norm': se/np.max(se),
+                                                 col.NL: nl,
+                                                 'nl_norm': nl/np.max(nl),
+                                                 col.CLS_ALL: cls_all,
+                                                 col.CLS_MEAS: cls_meas,
+                                                 col.CLS_TID2_ALL: cls_tid2_all,
+                                                 col.CLS_TID2_MEAS: cls_tid2_meas
                                                  })
         for label in out_dict:
             # concatenate positions
@@ -383,13 +426,17 @@ class ProcessLocalizations:
             y = np.ascontiguousarray(pos_concat[:, 1], dtype=np.float64)
             z = np.ascontiguousarray(pos_concat[:, 2], dtype=np.float64)
 
-            hl.pointsToVTK(file_path + label, x, y, z,
+            hl.pointsToVTK(file_path + '_' + lcoord + '_' + label, x, y, z,
                            data={col.TID2: np.array(out_dict[label][col.TID2]),
                                  col.TIM: np.array(out_dict[label][col.TIM]),
-                                 col.SE: np.array(out_dict[label][col.SE]/np.min(se)),
-                                 col.NL: np.array(out_dict[label][col.NL]/np.min(nl)),
+                                 col.SE: np.array(out_dict[label][col.SE]),
+                                 'se_norm': np.array(out_dict[label][col.SE])/np.max(se),
+                                 col.NL: np.array(out_dict[label][col.NL]),
+                                 'nl_norm': np.array(out_dict[label][col.NL]/np.max(nl)),
                                  col.CLS_ALL: np.array(out_dict[label][col.CLS_ALL]),
-                                 col.CLS_MEAS: np.array(out_dict[label][col.CLS_MEAS])
+                                 col.CLS_MEAS: np.array(out_dict[label][col.CLS_MEAS]),
+                                 col.CLS_TID2_ALL:np.array(out_dict[label][col.CLS_TID2_ALL]),
+                                 col.CLS_TID2_MEAS: np.array(out_dict[label][col.CLS_TID2_MEAS])
                                  })
 
 if __name__ == "__main__":
@@ -397,11 +444,16 @@ if __name__ == "__main__":
     pl = ProcessLocalizations(
         'Z:/siva_minflux/analysis//Multiwash/Syp_ATG9/220510_Syp_ATG9_ROI01\\220510_Syp_ATG9_ROI01.npy')
     pl.trim_min_localizations()
-    pl.cluster_tid(method=pl.CLS_METHOD_BAYES_GMM)
-    pl.cluster_meas(method=pl.CLS_METHOD_DBSCAN)
-    pl.cluster_all(method=pl.CLS_METHOD_DBSCAN)
-    pl.cluster_all_intersect()
-    pl.export_vtu(col.LTR, 'Z:/siva_minflux/analysis//Multiwash/Syp_ATG9/220510_Syp_ATG9_ROI01\\220510_Syp_ATG9_ROI01_ltr')
+    #pl.cluster_tid(method=pl.CLS_METHOD_BAYES_GMM)
+    #pl.cluster_meas(method=pl.CLS_METHOD_DBSCAN)
+    #pl.cluster_all(method=pl.CLS_METHOD_DBSCAN)
+    #pl.cluster_all_intersect(col.CLS_ALL)
+    pl.DBCLUSTER_EPS_ALL = 3e-8
+    pl.DBCLUSTER_EPS_MEAS = 3e-8
+    out_dict = pl.summary_per_tid2()
+    pl.export_table(out_dict)
+    #pl.export_vtu(out_dict=out_dict, lcoord=col.LTR, file_path='Z:/siva_minflux/analysis//Multiwash/Syp_ATG9/220510_Syp_ATG9_ROI01\\220510_Syp_ATG9_ROI01_ltr')
+
     #summary = pl.summary_per_tid2()
 
 
