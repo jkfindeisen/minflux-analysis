@@ -308,6 +308,8 @@ class MfxData:
             tim = obj[col.TIM][obj[col.VLD]]
             tid = obj[col.TID][obj[col.VLD]]
             vld = obj[col.VLD][obj[col.VLD]]
+            eco = obj[col.ITR][col.ECO][obj[col.VLD]]
+            efo = obj[col.ITR][col.EFO][obj[col.VLD]]
             # further trim for time ref_beads
             tim_trim = (tim > self.mintime_ref_beads[label]) * (tim < self.maxtime_ref_beads[label])
             lnc = lnc[tim_trim]
@@ -315,14 +317,18 @@ class MfxData:
             tim = tim[tim_trim]
             tid = tid[tim_trim]
             vld = vld[tim_trim]
+            eco = eco[tim_trim]
+            efo = efo[tim_trim]
             # Keep only last iteration
             lnc = lnc[:, -1]
             loc = loc[:, -1]
+            eco = eco[:, -1]
+            efo = efo[:, -1]
             lnc[:, 2] = lnc[:, 2]*self.CORRECT_Z_POSITION_FACTOR
             loc[:, 2] = loc[:, 2]*self.CORRECT_Z_POSITION_FACTOR
             tim_tid_mean = self.get_meantime_trackid(tid, tim)
             out_dic[label] = {col.TIM: tim, col.TIM_TID_MEAN: tim_tid_mean, col.TID: tid, col.LNC: lnc,
-                              col.LOC: loc, col.VLD: vld}
+                              col.LOC: loc, col.VLD: vld, col.ECO: eco, col.EFO: efo}
         # Add time
         add_time = 0
         add_tid = 0
@@ -384,21 +390,7 @@ class MfxData:
         out_dict = {col.TIM: time_vector, col.LNC: flat_pos2, col.LTR: flat_pos_trans, col.LRE: flat_pos_reg}
         scipy.io.savemat(os.path.join(self.outdir, self.msrfile_name + "_ref.mat"), out_dict)
 
-    def export_vtu(self, out_dict, lcoord, file_path):
-        # export to vtk format for view in paraview, ideally also clustering etc.
 
-        pos_concat = np.concatenate([out_dict[d][lcoord] for d in out_dict])
-        tid_concat = np.concatenate([out_dict[d][col.TID] for d in out_dict])
-        tim_concat = np.concatenate([out_dict[d][col.TIM] for d in out_dict])
-        # concatenate positions
-        x = np.ascontiguousarray(pos_concat[:, 0], dtype = np.float64)
-        y = np.ascontiguousarray(pos_concat[:, 1], dtype = np.float64)
-        z = np.ascontiguousarray(pos_concat[:, 2], dtype = np.float64)
-        r = np.random.uniform(0, 1, x.shape[0]) # This needs to be computed
-        keys = list(out_dict.keys())
-        p = np.repeat(range(1, len(keys)+1), [out_dict[k][lcoord].shape[0] for k in keys])
-        hl.pointsToVTK(file_path, x, y, z, data={'P': p, col.TID: tid_concat, col.TIM:  tim_concat,
-                                                 'radius': r})
 
 if __name__ == "__main__":
     t0 = time.time()
@@ -413,6 +405,7 @@ if __name__ == "__main__":
     mfx.zarr_import()
     mfx.set_valid_ref()
     regis = mfx.get_ref_transform()
+    out_dic = mfx.align_to_ref()
     mfx.show_ref_transform(regis[mfx.TRANS], rotate=None, save=False, show=True)
 
     #mfx1.MAX_TDIFF_REF = 10
@@ -437,7 +430,7 @@ if __name__ == "__main__":
     #        match_beads.append([mfx1.valid_ref_beads[idx],
     #                            mfx2.valid_ref_beads[np.where(mat_dd[idx] < max_beads_dist)[0][0]]])
 
-    #out_dic = mfx.align_to_ref()
+    #
 
     #print("Time elapsed: ",  time.time() - t0)
     #mfx.export_vtu(out_dic, col.LOC, "C:/Users/apoliti/Desktop/TMP/points_loc")
