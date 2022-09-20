@@ -108,6 +108,15 @@ is stored at /grd/mbm/R<nn>.
 
 
 # Python install instructions
+Install conda or miniconda (https://docs.conda.io/en/latest/miniconda.html). Start anaconda prompt and install in the base environment
+
+```
+conda install -c conda-forge jupyter
+conda install -c conda-forge ipython
+conda install -c conda-forge ipykernel
+``` 
+
+
 
 Create a working environment. Replace `my-env` with the name of your environment.
 
