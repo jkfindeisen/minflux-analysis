@@ -372,15 +372,12 @@ class ProcessLocalizations:
                  'COURSE': ['Data Structures', 'Machine Learning', 'OOPS with Java']}
 
         # print the contents using zip format.
-        for each_row in zip(*([i] + (j) for i, j in dict1.items())):
-
-            print(*each_row, " ")
         print('export_table')
         for label in out_dict:
             for each_row in zip(*([i] + (j)
                                   for i, j in out_dict[label].items())):
-
-                print(*each_row, " ")
+                print(" Hello ")
+                #print(*each_row, " ")
 
     def export_vtu(self, out_dict, lcoord, file_path):
 
