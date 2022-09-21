@@ -20,20 +20,22 @@ import time
 
 
 pl = ProcessLocalizations(
-    'Z:/siva_minflux/analysis//Multiwash/Syp_ATG9/220510_Syp_ATG9_ROI01\\220510_Syp_ATG9_ROI01.npy')
+    'Z:/siva_minflux/analysis//Single wash/Syp/220825_Syp_ROI2/220825_Syp_ROI2.npy')
+
 
 pl.log_parameters()
 pl.trim_min_localizations()
 pl.cluster_tid(method=pl.CLS_METHOD_BAYES_GMM)
+pl.DBCLUSTER_EPS_MEAS = 2e-9
 pl.cluster_meas(method=pl.CLS_METHOD_DBSCAN)
 pl.cluster_all(method=pl.CLS_METHOD_DBSCAN)
 pl.cluster_all_intersect(col.CLS_ALL)
-pl.DBCLUSTER_EPS_MERGED_MEAS = 3e-8
-pl.DBCLUSTER_EPS_MERGED_ALL = 3e-8
-pl.log_parameters()
-summary_dict = pl.summary_per_tid2()
-pl.export_csv(summary_dict, file_path=pl.file_path_no_ext())
-pl.export_vtu(in_dict=summary_dict, coord=col.LTR, file_path=pl.file_path_no_ext())
+#pl.DBCLUSTER_EPS_MERGED_MEAS = 3e-8
+#pl.DBCLUSTER_EPS_MERGED_ALL = 3e-8
+#pl.log_parameters()
+#summary_dict = pl.summary_per_tid2()
+#pl.export_csv(summary_dict, file_path=pl.file_path_no_ext())
+#pl.export_vtu(in_dict=summary_dict, coord=col.LTR, file_path=pl.file_path_no_ext())
 
 #mfx1.MAX_TDIFF_REF = 10
 #mfx2 = MfxData('Z:/siva_minflux/data/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01_Second.msr',

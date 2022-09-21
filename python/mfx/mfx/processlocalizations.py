@@ -42,20 +42,28 @@ class ProcessLocalizations:
             self.loc[label][col.CLS_TRACK] = np.ones(self.loc[label][col.VLD].shape)*(0) # Default is a cluster = whole track
             self.loc[label][col.CLS_MEAS] = np.ones(self.loc[label][col.VLD].shape)*(-1)
             self.loc[label][col.CLS_ALL] = np.ones(self.loc[label][col.VLD].shape)*(-1)
+            self.loc[label][col.CLS_MERGED_MEAS] = np.ones(self.loc[label][col.VLD].shape)*(-1)
+            self.loc[label][col.CLS_MERGED_ALL] = np.ones(self.loc[label][col.VLD].shape)*(-1)
             self.loc[label][col.TID2] = np.ones(self.loc[label][col.VLD].shape)*(-1)
         self.set_tid2()
+        self.logger = logging.getLogger('processlocalizations')
+
+        self.set_logger()
+
+
+    def set_logger(self):
         log_fmt = "%(asctime)s [%(levelname)s] **** %(funcName)s ****\n%(message)s"
-        logging.basicConfig(
-            filemode='w',
-            level=logging.INFO,
-            format=log_fmt,
-            filename = self.file_path_no_ext() + ".log"
-        )
+        self.logger.handlers = []
+        self.logger.setLevel(logging.INFO)
+        fh = logging.FileHandler(self.file_path_no_ext() + ".log", mode = 'w')
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(CustomFormatter(log_fmt))
         ch = logging.StreamHandler(sys.stdout)
         ch.setLevel(logging.INFO)
         ch.setFormatter(CustomFormatter(log_fmt))
-        logging.getLogger().addHandler(ch)
-
+        self.logger.addHandler(fh)
+        self.logger.addHandler(ch)
+        self.logger.propagate = False
 
     def log_parameters(self):
         log_msg = ""
@@ -63,7 +71,7 @@ class ProcessLocalizations:
             if k == 'loc':
                 continue
             log_msg += '%s %s\n' % (k, v)
-        logging.info(log_msg)
+        self.logger.info(log_msg)
 
     def file_path_no_ext(self):
         return os.path.splitext(self.file_path)[0]
@@ -85,7 +93,7 @@ class ProcessLocalizations:
             for col_name in self.loc[label]:
                 self.loc[label][col_name] = self.loc[label][col_name][vld]
             log_msg += '%s Removed %d/%d tracks with less than %d localizations\n' % (label, remove_tid, len(uid), self.MIN_LOCALIZATIONS)
-        logging.info(log_msg)
+        self.logger.info(log_msg)
         # Renumerate to have continuous entries
         self.set_tid2()
 
@@ -154,7 +162,7 @@ class ProcessLocalizations:
                 uid2, idxs2, counts2 = np.unique(self.loc[label][col.TID2], return_index=True, return_counts=True)
             log_msg += '%s MIN_SPLIT_LOCALIZATION: %d, sd_limit: %.2f nm\n'  % (label, self.FACT_SPLIT_LOCALIZATIONS * self.MIN_LOCALIZATIONS, std_all['quantiles'][0] * 1e9)
             log_msg += 'Processed TID: %d / %d, Total tracks TID2: %d\n' % (processed, len(uid), len(uid2))
-        logging.info(log_msg)
+        self.logger.info(log_msg)
 
     def set_tid2(self):
         # Set index of track accounting for splitting within a track
@@ -198,12 +206,12 @@ class ProcessLocalizations:
             uid = uid[uid >= 0]
             log_msg += '%s, Method %s, eps: %.2f nm\n' % (label, method, self.DBCLUSTER_EPS_MEAS*1e9)
             log_msg += 'Total tracks TID2: %d, total clusters meas: %d\n' % (len(uid), len(uid_cls))
-        logging.info(log_msg)
+        self.logger.info(log_msg)
 
     def cluster_all(self, method):
         # Concatenate the localizations
         if len(self.loc) == 1:
-            logging.info('*******cluster_all*******\nOnly one wash. Nothing to do')
+            self.logger.info('*******cluster_all*******\nOnly one wash. Nothing to do')
             return
 
         loc_all = np.concatenate([self.loc[label][col.LTR][self.loc[label][col.TID2] >= 0] for label in self.loc])
@@ -227,11 +235,18 @@ class ProcessLocalizations:
             uid_tid = uid_tid[uid_tid >= 0]
             log_msg += '%s, Method: %s, eps: %.2f nm\nTotal tracks TID2: %d, total cluster all: %d\n' \
                        % (label, method, self.DBCLUSTER_EPS_ALL*1e9, len(uid_tid), len(uid_cls))
-        logging.info(log_msg)
+        self.logger.info(log_msg)
 
     def cluster_all_intersect(self, column):
         # TODO: Generalize for more than 2 washes
+
         keys = list(self.loc.keys())
+        if len(keys) == 1:
+            self.logger.info("Only one wash")
+            return
+        if len(keys) > 2:
+            self.logger.info("More than two washes. Intersect not yet implemented")
+            return
         uid_P = [np.unique(self.loc[keys[0]][column]), np.unique(self.loc[keys[1]][column])]
         uid_P = [ui[ui > 0] for ui in uid_P]
 
@@ -257,7 +272,7 @@ class ProcessLocalizations:
             log_msg += '%s cluster with %s cls %d/%d = %.2f' % (keys[k_idx1], keys[k_idx2], len(intersect),
                                                                 len(uid_P[idx]), len(intersect)/len(uid_P[idx]))
             log_msg += 'TID2 %d/%d = %.2f\n' % (len(tid2_intersect[idx]), len(tid2_total[idx]), len(tid2_intersect[idx])/len(tid2_total[idx]))
-        logging.info(log_msg)
+        self.logger.info(log_msg)
 
 
 
@@ -281,16 +296,16 @@ class ProcessLocalizations:
                 id_max = np.argsort(counts_cls)
                 self.loc[label][column_cls][tid_idxs] = u_cls[id_max[-1]]
 
-        # Assign TID2 with cluster = -1, to a unique Cluser_ID or All clusters
+        # Assign TID2 with cluster = -1, to a unique Cluser_ID or All clusters.
         # find maximal cluster_ID
         cluster_id = np.max(np.concatenate([self.loc[label][column_cls] for label in self.loc])) + 1
         for label in self.loc:
             uid, idxs, counts = np.unique(self.loc[label][col.TID2], return_index=True, return_counts=True)
             for i, idx in enumerate(idxs):
-                tid_idxs = range(idx, idx+counts[i])
+                tid_idxs = (self.loc[label][col.TID2] == uid[i])
                 if uid[i] == -1:
                     continue
-                if self.loc[label][column_cls][idx] == -1:
+                if self.loc[label][column_cls][tid_idxs][0] == -1:
                     self.loc[label][column_cls][tid_idxs] = cluster_id
                     cluster_id += 1
 
