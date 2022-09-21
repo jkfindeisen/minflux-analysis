@@ -19,7 +19,6 @@ import warnings
 # User relative imports to run main
 from . import mfxcolnames as col
 import re
-import time
 
 
 class MfxData:

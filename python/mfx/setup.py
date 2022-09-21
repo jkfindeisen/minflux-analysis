@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 from setuptools import setup
 setup(name='mfx',
       version='0.1',

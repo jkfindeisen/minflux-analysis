@@ -1,0 +1,4 @@
+[project]
+name = "mfx"
+version = "0.0.1"
+dependencies = ["matplotlib", "numpy", "scipy"]

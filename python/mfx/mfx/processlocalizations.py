@@ -3,7 +3,7 @@ import numpy as np
 from sklearn import cluster
 import os
 from sklearn import mixture
-from python.mfx import mfxcolnames as col
+from . import mfxcolnames as col
 from evtk import hl
 import logging
 # Run clustering on data remove, make invalid if below a certain level separate or merge cluster
