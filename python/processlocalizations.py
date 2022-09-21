@@ -1,4 +1,4 @@
-
+import pandas as pd
 import numpy as np
 from sklearn import cluster
 import os
@@ -335,12 +335,10 @@ class ProcessLocalizations:
                 se_xyz = std_xyz/np.sqrt(nl)
                 std = np.sqrt(np.mean(var_xyz))
                 se = std/np.sqrt(nl)
-                mean_time = np.mean(self.loc[label][col.TIM][tid_idxs])
-                mean_pos = np.mean(self.loc[label][col.LTR][tid_idxs], axis=0)
-                summary[label][col.TIM].append(mean_time)
+                summary[label][col.TIM].append(np.mean(self.loc[label][col.TIM][tid_idxs]).tolist())
                 summary[label][col.LOC].append(np.mean(self.loc[label][col.LOC][tid_idxs], axis=0).tolist())
                 summary[label][col.LNC].append(np.mean(self.loc[label][col.LNC][tid_idxs], axis=0).tolist())
-                summary[label][col.LTR].append(mean_pos.tolist())
+                summary[label][col.LTR].append(np.mean(self.loc[label][col.LTR][tid_idxs], axis=0).tolist())
                 summary[label][col.STD].append(std)
                 summary[label][col.SE].append(se)
                 summary[label][col.NL].append(nl)
@@ -367,17 +365,20 @@ class ProcessLocalizations:
         return summary
 
     def export_table(self, out_dict):
-        dict1 = {'NAME': ['Samuel', 'Richie', 'Lauren'],
-                 'AGE': [21, 20, 21],
-                 'COURSE': ['Data Structures', 'Machine Learning', 'OOPS with Java']}
-
-        # print the contents using zip format.
         print('export_table')
-        for label in out_dict:
-            for each_row in zip(*([i] + (j)
-                                  for i, j in out_dict[label].items())):
-                print(" Hello ")
-                #print(*each_row, " ")
+        keys = list(out_dict.keys())
+        for i, key in enumerate(keys):
+            df = pd.DataFrame.from_dict(out_dict[key], orient='columns')
+            # expand coordinates
+            for colname in [col.LTR, col.LOC, col.LNC, col.STD_XYZ, col.SE_XYZ]:
+                df[[colname + '_x', colname + '_y', colname + '_z']] = pd.DataFrame(
+                    df[colname].tolist(), index=df.index)
+            df['wash'] = np.repeat(key, len(df[colname].tolist()))
+            if i == 0:
+                df.to_csv('C:/Users/apoliti/Desktop/test.csv', mode='w', index=False)
+            else:
+                df.to_csv('C:/Users/apoliti/Desktop/test.csv', mode='a', index=False)
+
 
     def export_vtu(self, out_dict, lcoord, file_path):
 
