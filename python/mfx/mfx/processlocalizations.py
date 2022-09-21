@@ -1,12 +1,15 @@
 import pandas as pd
 import numpy as np
 from sklearn import cluster
+from .logformatter.customformatter import CustomFormatter
 import os
 from sklearn import mixture
 from . import mfxcolnames as col
 from evtk import hl
 import logging
+import sys
 # Run clustering on data remove, make invalid if below a certain level separate or merge cluster
+
 
 class ProcessLocalizations:
     CLS_METHOD_GMM = 'gmm'
@@ -41,21 +44,26 @@ class ProcessLocalizations:
             self.loc[label][col.CLS_ALL] = np.ones(self.loc[label][col.VLD].shape)*(-1)
             self.loc[label][col.TID2] = np.ones(self.loc[label][col.VLD].shape)*(-1)
         self.set_tid2()
+        log_fmt = "%(asctime)s [%(levelname)s] **** %(funcName)s ****\n%(message)s"
         logging.basicConfig(
             filemode='w',
             level=logging.INFO,
-            format="%(asctime)s [%(levelname)s] %(message)s",
+            format=log_fmt,
             filename = self.file_path_no_ext() + ".log"
         )
-        logging.getLogger().addHandler(logging.StreamHandler())
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(CustomFormatter(log_fmt))
+        logging.getLogger().addHandler(ch)
+
 
     def log_parameters(self):
-        log_out = "**** PARAMETERS ****\n"
+        log_msg = ""
         for k, v in self.__dict__.items():
             if k == 'loc':
                 continue
-            log_out += '%s %s\n' % (k, v)
-        logging.info(log_out.strip())
+            log_msg += '%s %s\n' % (k, v)
+        logging.info(log_msg)
 
     def file_path_no_ext(self):
         return os.path.splitext(self.file_path)[0]
@@ -64,7 +72,7 @@ class ProcessLocalizations:
         """
         Trim all tracks that have not enough localizations. Set VLD to False
         """
-
+        log_msg = ''
         for label in self.loc:
             remove_tid = 0
             uid, idxs, counts = np.unique(self.loc[label][col.TID], return_index=True, return_counts=True)
@@ -76,8 +84,8 @@ class ProcessLocalizations:
             vld = self.loc[label][col.VLD]
             for col_name in self.loc[label]:
                 self.loc[label][col_name] = self.loc[label][col_name][vld]
-            logging.info("*******time_min_localizations*******\n%s Removed %d/%d tracks with less than %d localisations"
-                  % (label, remove_tid, len(uid), self.MIN_LOCALIZATIONS))
+            log_msg += '%s Removed %d/%d tracks with less than %d localizations\n' % (label, remove_tid, len(uid), self.MIN_LOCALIZATIONS)
+        logging.info(log_msg)
         # Renumerate to have continuous entries
         self.set_tid2()
 
@@ -104,7 +112,7 @@ class ProcessLocalizations:
         # split and clean up tracks
         # Update tid2 index
         std_all = self.get_overall_std([self.STD_QUANTILE])
-
+        log_msg = ''
         for label in self.loc:
             efo_upper_limit = np.quantile(self.loc[label][col.EFO], [0.5])*2 # Twice higher than median, more than one fluorophore
 
@@ -144,8 +152,9 @@ class ProcessLocalizations:
                     self.loc[label][col.CLS_TRACK][tid_idxs] = predict
                     self.set_tid2()
                 uid2, idxs2, counts2 = np.unique(self.loc[label][col.TID2], return_index=True, return_counts=True)
-            logging.info('*******cluster_tid*******\n%s MIN_SPLIT_LOCALIZATION: %d, sd_limit: %.2f nm\nProcessed TID: %d / %d, Total tracks TID2: %d'
-                         % (label, self.FACT_SPLIT_LOCALIZATIONS * self.MIN_LOCALIZATIONS, std_all['quantiles'][0] * 1e9, processed, len(uid), len(uid2)))
+            log_msg += '%s MIN_SPLIT_LOCALIZATION: %d, sd_limit: %.2f nm\n'  % (label, self.FACT_SPLIT_LOCALIZATIONS * self.MIN_LOCALIZATIONS, std_all['quantiles'][0] * 1e9)
+            log_msg += 'Processed TID: %d / %d, Total tracks TID2: %d\n' % (processed, len(uid), len(uid2))
+        logging.info(log_msg)
 
     def set_tid2(self):
         # Set index of track accounting for splitting within a track
@@ -181,13 +190,15 @@ class ProcessLocalizations:
             else:
                 raise ValueError("Available methods for clustering a measurement:" + self.CLS_METHOD_DBSCAN)
         self.inter_cluster_cleanup(column_cls=col.CLS_MEAS)
+        log_msg = ''
         for label in self.loc:
             uid = np.unique(self.loc[label][col.TID2])
             uid_cls = np.unique(self.loc[label][col.CLS_MEAS])
             uid_cls = uid_cls[uid_cls >= 0]
             uid = uid[uid >= 0]
-            logging.info('*******cluster_meas*******\n%s, Method %s, eps: %.2f nm\nTotal tracks TID2: %d, total clusters meas: %d'
-                  % (label, method, self.DBCLUSTER_EPS_MEAS*1e9, len(uid), len(uid_cls)))
+            log_msg += '%s, Method %s, eps: %.2f nm\n' % (label, method, self.DBCLUSTER_EPS_MEAS*1e9)
+            log_msg += 'Total tracks TID2: %d, total clusters meas: %d\n' % (len(uid), len(uid_cls))
+        logging.info(log_msg)
 
     def cluster_all(self, method):
         # Concatenate the localizations
@@ -208,13 +219,15 @@ class ProcessLocalizations:
             istart = iend
 
         self.inter_cluster_cleanup(column_cls=col.CLS_ALL)
+        log_msg = ''
         for label in self.loc:
             uid_cls = np.unique(self.loc[label][col.CLS_ALL])
             uid_tid = np.unique(self.loc[label][col.TID2])
             uid_cls = uid_cls[uid_cls >= 0]
             uid_tid = uid_tid[uid_tid >= 0]
-            logging.info('*******cluster_all*******\n%s, Method: %s, eps: %.2f nm' % (label, method, self.DBCLUSTER_EPS_ALL*1e9))
-            logging.info('Total tracks TID2: %d, total cluster all: %d' % (len(uid_tid), len(uid_cls)))
+            log_msg += '%s, Method: %s, eps: %.2f nm\nTotal tracks TID2: %d, total cluster all: %d\n' \
+                       % (label, method, self.DBCLUSTER_EPS_ALL*1e9, len(uid_tid), len(uid_cls))
+        logging.info(log_msg)
 
     def cluster_all_intersect(self, column):
         # TODO: Generalize for more than 2 washes
@@ -234,17 +247,19 @@ class ProcessLocalizations:
             tid2_intersect.append(np.unique(self.loc[key][col.TID2][idx_intersect]))
             tmp = np.unique(self.loc[key][col.TID2])
             tid2_total.append(tmp[tmp >= 0])
-
-        logging.info('*******cluster_all_intersect*******')
+        log_msg = ''
         for idx in range(0, 2):
             k_idx1 = 0
             k_idx2 = 1
             if idx == 1:
                 k_idx1 = 1
                 k_idx2 = 0
-            logging.info('%s cluster with %s cls %d/%d = %.2f; TID2 %d/%d = %.2f' %
-                  (keys[k_idx1], keys[k_idx2], len(intersect), len(uid_P[idx]), len(intersect)/len(uid_P[idx]),
-                   len(tid2_intersect[idx]), len(tid2_total[idx]), len(tid2_intersect[idx])/len(tid2_total[idx])))
+            log_msg += '%s cluster with %s cls %d/%d = %.2f' % (keys[k_idx1], keys[k_idx2], len(intersect),
+                                                                len(uid_P[idx]), len(intersect)/len(uid_P[idx]))
+            log_msg += 'TID2 %d/%d = %.2f\n' % (len(tid2_intersect[idx]), len(tid2_total[idx]), len(tid2_intersect[idx])/len(tid2_total[idx]))
+        logging.info(log_msg)
+
+
 
     def inter_cluster_cleanup(self, column_cls):
         # Loop through the data set and perform a majority voting
@@ -442,30 +457,6 @@ class ProcessLocalizations:
                            data=pview_dict)
 
 
-if __name__ == "__main__":
-
-    os.environ["OMP_NUM_THREADS"] = '1'
-    pl = ProcessLocalizations(
-        'Z:/siva_minflux/analysis//Multiwash/Syp_ATG9/220510_Syp_ATG9_ROI01\\220510_Syp_ATG9_ROI01.npy')
-
-    pl.log_parameters()
-    pl.trim_min_localizations()
-    pl.cluster_tid(method=pl.CLS_METHOD_BAYES_GMM)
-    pl.cluster_meas(method=pl.CLS_METHOD_DBSCAN)
-    pl.cluster_all(method=pl.CLS_METHOD_DBSCAN)
-    pl.cluster_all_intersect(col.CLS_ALL)
-    pl.DBCLUSTER_EPS_MERGED_MEAS = 3e-8
-    pl.DBCLUSTER_EPS_MERGED_ALL = 3e-8
-    pl.log_parameters()
-    summary_dict = pl.summary_per_tid2()
-    pl.export_csv(summary_dict, file_path=pl.file_path_no_ext())
-    pl.export_vtu(in_dict=summary_dict, coord=col.LTR, file_path=pl.file_path_no_ext())
-
-    #summary = pl.summary_per_tid2()
-
-
-    #std_all = pl.get_overall_std()
-    #print(std_all)
 
 
 

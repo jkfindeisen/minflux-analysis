@@ -1,20 +1,39 @@
 from mfx.mfxdata import MfxData
+from mfx.processlocalizations import ProcessLocalizations
+import mfx.mfxcolnames as col
 import time
 
-t0 = time.time()
-loc_dir = 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/VGLUT1_VGLUT1/'
-glob_dir = 'Z:/siva_minflux/analysis/Multiwash/VGLUT1_VGLUT1/'
-mfx = MfxData('Z:/siva_minflux/data/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01_First.msr',
-              outdir_main=glob_dir, zarr_dir_main=loc_dir)
+# t0 = time.time()
+# loc_dir = 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/VGLUT1_VGLUT1/'
+# glob_dir = 'Z:/siva_minflux/analysis/Multiwash/VGLUT1_VGLUT1/'
+# mfx = MfxData('Z:/siva_minflux/data/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01_First.msr',
+#               outdir_main=glob_dir, zarr_dir_main=loc_dir)
+#
+# # Example of workaround for not merged msr file
+# mfx.zarrdir = {'220811_VGLUT1_P1': 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01/220811_VGLUT1_P1',
+#                '220811_VGLUT1_P2': 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01/220811_VGLUT1_P2'}
+# mfx.zarr_import()
+# mfx.set_valid_ref()
+# regis = mfx.get_ref_transform()
+# out_dic = mfx.align_to_ref()
+# mfx.show_ref_transform(regis[mfx.TRANS], rotate=None, save=False, show=True)
 
-# Example of workaround for not merged msr file
-mfx.zarrdir = {'220811_VGLUT1_P1': 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01/220811_VGLUT1_P1',
-               '220811_VGLUT1_P2': 'C:/Users/apoliti/Desktop/mflux_zarr_tmp_storage/analysis/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01/220811_VGLUT1_P2'}
-mfx.zarr_import()
-mfx.set_valid_ref()
-regis = mfx.get_ref_transform()
-out_dic = mfx.align_to_ref()
-mfx.show_ref_transform(regis[mfx.TRANS], rotate=None, save=False, show=True)
+
+pl = ProcessLocalizations(
+    'Z:/siva_minflux/analysis//Multiwash/Syp_ATG9/220510_Syp_ATG9_ROI01\\220510_Syp_ATG9_ROI01.npy')
+
+pl.log_parameters()
+pl.trim_min_localizations()
+pl.cluster_tid(method=pl.CLS_METHOD_BAYES_GMM)
+pl.cluster_meas(method=pl.CLS_METHOD_DBSCAN)
+pl.cluster_all(method=pl.CLS_METHOD_DBSCAN)
+pl.cluster_all_intersect(col.CLS_ALL)
+pl.DBCLUSTER_EPS_MERGED_MEAS = 3e-8
+pl.DBCLUSTER_EPS_MERGED_ALL = 3e-8
+pl.log_parameters()
+summary_dict = pl.summary_per_tid2()
+pl.export_csv(summary_dict, file_path=pl.file_path_no_ext())
+pl.export_vtu(in_dict=summary_dict, coord=col.LTR, file_path=pl.file_path_no_ext())
 
 #mfx1.MAX_TDIFF_REF = 10
 #mfx2 = MfxData('Z:/siva_minflux/data/Multiwash/VGLUT1_VGLUT1/220811_VGLUT1_ROI01_Second.msr',
