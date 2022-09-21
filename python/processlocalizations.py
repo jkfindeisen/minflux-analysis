@@ -5,7 +5,7 @@ import os
 from sklearn import mixture
 import mfxcolnames as col
 from evtk import hl
-
+import logging
 # Run clustering on data remove, make invalid if below a certain level separate or merge cluster
 
 class ProcessLocalizations:
@@ -16,17 +16,24 @@ class ProcessLocalizations:
     GMM_MAX_COMPONENTS = 3          # Max components for GMM. 1 - is one fluorophore, 2 - fluorophores alternate, 3 - 2 fluorophores alternate + also simultaneously
     GMM_COVARIANCE_TYPE = 'diag'
     GMM_N_INIT = 3                  # GMM number of initializations
-    MIN_LOCALIZATIONS = 4           # Minimum number of localizations pre track
-    MIN_SPLIT_LOCALIZATIONS = 2*MIN_LOCALIZATIONS    # Perform analysis and split eventually localizations with more than 8
-    DBCLUSTER_EPS_TRACK = 2e-8    # 1e-8 = 10 nm, eps for clustering localization of a single track
-    DBCLUSTER_EPS_MEAS = 2e-8     # eps for clustering localization of all localization in one measurement
-    DBCLUSTER_EPS_ALL = 2e-8      # eps for clustering localization of all localization in all measurement
-    DBCLUSTER_SIZE = 4
     STD_QUANTILE = 0.75           # STD quantile for further processing TID and split those
 
     def __init__(self, file_path):
-        # file_path is a pickled file
+        # file_path is a numpy, pickled file from  mfxdata.export_numpy()
+        self.file_path = file_path
+
+        # Some instance variables that may change depending on sample, ...
+        self.MIN_LOCALIZATIONS = 3
+        self.FACT_SPLIT_LOCALIZATIONS = 2         # Perform analysis and split eventually localizations with more than  self.FACT_SPLIT_LOCATIONS*self.MIN_LOCALIZATIONS
+        self.DBCLUSTER_SIZE = 3               # minimal size of cluster for localizations ~ at least MIN_LOCALIZATIONS
+        self.DBCLUSTER_EPS_TRACK = 2e-8       # 1e-8 = 10 nm, eps for clustering localization of a single track
+        self.DBCLUSTER_EPS_MEAS = 2e-8        # dbscan eps for clustering localizations in each measurement
+        self.DBCLUSTER_EPS_ALL = 2e-8         # dbscan eps for clustering localizations in all measurements
+        self.DBCLUSTER_EPS_MERGED_ALL = 2e-8  # dbscan eps for clustering merged localizations in each measurement
+        self.DBCLUSTER_EPS_MERGED_MEAS = 2e-8 # dbscan eps for clustering merged localizations in all measurements
+
         self.loc = np.load(file_path, allow_pickle=True).item()
+
         # add clustering columns initialize with no clusters
         for label in self.loc:
             self.loc[label][col.CLS_TRACK] = np.ones(self.loc[label][col.VLD].shape)*(0) # Default is a cluster = whole track
@@ -34,6 +41,24 @@ class ProcessLocalizations:
             self.loc[label][col.CLS_ALL] = np.ones(self.loc[label][col.VLD].shape)*(-1)
             self.loc[label][col.TID2] = np.ones(self.loc[label][col.VLD].shape)*(-1)
         self.set_tid2()
+        logging.basicConfig(
+            filemode='w',
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(message)s",
+            filename = self.file_path_no_ext() + ".log"
+        )
+        logging.getLogger().addHandler(logging.StreamHandler())
+
+    def log_parameters(self):
+        log_out = "**** PARAMETERS ****\n"
+        for k, v in self.__dict__.items():
+            if k == 'loc':
+                continue
+            log_out += '%s %s\n' % (k, v)
+        logging.info(log_out.strip())
+
+    def file_path_no_ext(self):
+        return os.path.splitext(self.file_path)[0]
 
     def trim_min_localizations(self):
         """
@@ -51,7 +76,7 @@ class ProcessLocalizations:
             vld = self.loc[label][col.VLD]
             for col_name in self.loc[label]:
                 self.loc[label][col_name] = self.loc[label][col_name][vld]
-            print("*******time_min_localizations*******\n%s Removed %d/%d tracks with less than %d localisations"
+            logging.info("*******time_min_localizations*******\n%s Removed %d/%d tracks with less than %d localisations"
                   % (label, remove_tid, len(uid), self.MIN_LOCALIZATIONS))
         # Renumerate to have continuous entries
         self.set_tid2()
@@ -90,7 +115,7 @@ class ProcessLocalizations:
                 tid_idxs = range(idx, idx+counts[i])
                 sd = np.sqrt(np.mean(np.var(self.loc[label][col.LTR][tid_idxs], axis=0)))
 
-                if counts[i] < self.MIN_SPLIT_LOCALIZATIONS or sd < std_all['quantiles'][0]:
+                if counts[i] < self.FACT_SPLIT_LOCALIZATIONS*self.MIN_LOCALIZATIONS or sd < std_all['quantiles'][0]:
                     self.loc[label][col.CLS_TRACK][tid_idxs] = 0
                     continue
 
@@ -119,8 +144,8 @@ class ProcessLocalizations:
                     self.loc[label][col.CLS_TRACK][tid_idxs] = predict
                     self.set_tid2()
                 uid2, idxs2, counts2 = np.unique(self.loc[label][col.TID2], return_index=True, return_counts=True)
-            print('*******cluster_tid*******\n%s MIN_SPLIT_LOCALIZATION: %d, sd_limit: %.2f nm\nProcessed TID: %d / %d, Total tracks TID2: %d'
-                  % (label, self.MIN_SPLIT_LOCALIZATIONS, std_all['quantiles'][0]*1e9, processed, len(uid), len(uid2)))
+            logging.info('*******cluster_tid*******\n%s MIN_SPLIT_LOCALIZATION: %d, sd_limit: %.2f nm\nProcessed TID: %d / %d, Total tracks TID2: %d'
+                         % (label, self.FACT_SPLIT_LOCALIZATIONS * self.MIN_LOCALIZATIONS, std_all['quantiles'][0] * 1e9, processed, len(uid), len(uid2)))
 
     def set_tid2(self):
         # Set index of track accounting for splitting within a track
@@ -160,14 +185,14 @@ class ProcessLocalizations:
             uid = np.unique(self.loc[label][col.TID2])
             uid_cls = np.unique(self.loc[label][col.CLS_MEAS])
             uid_cls = uid_cls[uid_cls >= 0]
-            uid = uid[uid >=0 ]
-            print('*******cluster_meas*******\n%s, Method %s, eps: %.2f nm\nTotal tracks TID2: %d, total clusters meas: %d'
+            uid = uid[uid >= 0]
+            logging.info('*******cluster_meas*******\n%s, Method %s, eps: %.2f nm\nTotal tracks TID2: %d, total clusters meas: %d'
                   % (label, method, self.DBCLUSTER_EPS_MEAS*1e9, len(uid), len(uid_cls)))
 
     def cluster_all(self, method):
         # Concatenate the localizations
         if len(self.loc) == 1:
-            print('*******cluster_all*******\nOnly one wash. Nothing to do')
+            logging.info('*******cluster_all*******\nOnly one wash. Nothing to do')
             return
 
         loc_all = np.concatenate([self.loc[label][col.LTR][self.loc[label][col.TID2] >= 0] for label in self.loc])
@@ -188,8 +213,8 @@ class ProcessLocalizations:
             uid_tid = np.unique(self.loc[label][col.TID2])
             uid_cls = uid_cls[uid_cls >= 0]
             uid_tid = uid_tid[uid_tid >= 0]
-            print('*******cluster_all*******\n%s, Method: %s, eps: %.2f nm' % (label, method, self.DBCLUSTER_EPS_ALL*1e9))
-            print('Total tracks TID2: %d, total cluster all: %d' % (len(uid_tid), len(uid_cls)))
+            logging.info('*******cluster_all*******\n%s, Method: %s, eps: %.2f nm' % (label, method, self.DBCLUSTER_EPS_ALL*1e9))
+            logging.info('Total tracks TID2: %d, total cluster all: %d' % (len(uid_tid), len(uid_cls)))
 
     def cluster_all_intersect(self, column):
         # TODO: Generalize for more than 2 washes
@@ -210,14 +235,14 @@ class ProcessLocalizations:
             tmp = np.unique(self.loc[key][col.TID2])
             tid2_total.append(tmp[tmp >= 0])
 
-        print('*******cluster_all_intersect*******')
+        logging.info('*******cluster_all_intersect*******')
         for idx in range(0, 2):
             k_idx1 = 0
             k_idx2 = 1
             if idx == 1:
                 k_idx1 = 1
                 k_idx2 = 0
-            print('%s cluster with %s cls %d/%d = %.2f; TID2 %d/%d = %.2f' %
+            logging.info('%s cluster with %s cls %d/%d = %.2f; TID2 %d/%d = %.2f' %
                   (keys[k_idx1], keys[k_idx2], len(intersect), len(uid_P[idx]), len(intersect)/len(uid_P[idx]),
                    len(tid2_intersect[idx]), len(tid2_total[idx]), len(tid2_intersect[idx])/len(tid2_total[idx])))
 
@@ -320,8 +345,8 @@ class ProcessLocalizations:
         summary = {}
         for label in self.loc:
             summary[label] = {col.TID2: [], col.TIM: [], col.LOC: [], col.LNC: [], col.LTR: [], col.STD: [],
-                              col.SE: [], col.NL: [], col.STD_XYZ: [], col.SE_XYZ: [],  col.CLS_MEAS: [],
-                              col.CLS_ALL: [], col.CLS_TID2_MEAS: [], col.CLS_TID2_ALL: []}
+                              col.SE: [], col.NL: [], col.STD_XYZ: [], col.SE_XYZ: [], col.CLS_MEAS: [],
+                              col.CLS_ALL: [], col.CLS_MERGED_MEAS: [], col.CLS_MERGED_ALL: []}
             uid, idxs, counts = np.unique(self.loc[label][col.TID2], return_index=True, return_counts=True)
             for i, idx in enumerate(idxs):
                 # do not add non-valid localizations where the single track failed
@@ -351,106 +376,90 @@ class ProcessLocalizations:
 
         # cluster single wash measurement at the level of merged localizations
         for label in summary:
-            summary[label][col.CLS_TID2_MEAS] = self.dbscan(summary[label][col.LTR],
-                                                            eps=self.DBCLUSTER_EPS_MEAS, min_samples=1)
+            summary[label][col.CLS_MERGED_MEAS] = self.dbscan(summary[label][col.LTR],
+                                                              eps=self.DBCLUSTER_EPS_MERGED_MEAS, min_samples=1)
+
 
         # cluster combined wash at the level of merged localizations
         loc_all = np.concatenate([summary[label][col.LTR] for label in summary])
-        cls_idx = self.dbscan(loc_all, eps=self.DBCLUSTER_EPS_ALL, min_samples=1)
+        cls_idx = self.dbscan(loc_all, eps=self.DBCLUSTER_EPS_MERGED_ALL, min_samples=1)
         istart = 0
         for label in summary:
             iend = istart + len(summary[label][col.CLS_ALL])
-            summary[label][col.CLS_TID2_ALL] = cls_idx[range(istart, iend)]
+            summary[label][col.CLS_MERGED_ALL] = cls_idx[range(istart, iend)]
             istart = iend
         return summary
 
-    def export_table(self, out_dict):
-        print('export_table')
-        keys = list(out_dict.keys())
+    def export_csv(self, in_dict, file_path):
+        print('export csv table')
+        keys = list(in_dict.keys())
         for i, key in enumerate(keys):
-            df = pd.DataFrame.from_dict(out_dict[key], orient='columns')
-            # expand coordinates
+            df = pd.DataFrame.from_dict(in_dict[key], orient='columns')
+            # expand coordinates entries
             for colname in [col.LTR, col.LOC, col.LNC, col.STD_XYZ, col.SE_XYZ]:
                 df[[colname + '_x', colname + '_y', colname + '_z']] = pd.DataFrame(
                     df[colname].tolist(), index=df.index)
             df['wash'] = np.repeat(key, len(df[colname].tolist()))
             if i == 0:
-                df.to_csv('C:/Users/apoliti/Desktop/test.csv', mode='w', index=False)
+                df.to_csv(file_path + '.csv', mode='w', index=False)
             else:
-                df.to_csv('C:/Users/apoliti/Desktop/test.csv', mode='a', index=False)
+                df.to_csv(file_path + '.csv', mode='a', index=False, header=False)
 
-
-    def export_vtu(self, out_dict, lcoord, file_path):
-
+    def export_vtu(self, in_dict, coord, file_path):
+        print('export paraview file')
+        # export one single file
+        export_column = [col.TID2, col.TIM, col.CLS_ALL, col.CLS_MEAS,
+                         col.CLS_MERGED_MEAS, col.CLS_MERGED_ALL, col.SE, col.NL]
         # export to vtk format for view in paraview, ideally also clustering etc.
+        pos = np.concatenate([in_dict[d][coord] for d in in_dict])
+        x = np.ascontiguousarray(pos[:, 0], dtype = np.float64)
+        y = np.ascontiguousarray(pos[:, 1], dtype = np.float64)
+        z = np.ascontiguousarray(pos[:, 2], dtype = np.float64)
+        pview_dict = {}
+        for column in export_column:
+            pview_dict[column] = np.concatenate([in_dict[d][column] for d in in_dict])
+        keys = list(in_dict.keys())
+        pview_dict['wash'] = np.repeat(range(1, len(keys)+1), [len(in_dict[k][coord]) for k in keys])
+        pview_dict['se_norm'] = pview_dict['se']/np.max(pview_dict['se'])
+        pview_dict['nl_norm'] = pview_dict['nl']/np.max(pview_dict['nl'])
+        hl.pointsToVTK(file_path + '_' + coord, x, y, z, data=pview_dict)
 
-        pos_concat = np.concatenate([out_dict[d][lcoord] for d in out_dict])
-        tid_concat = np.concatenate([out_dict[d][col.TID2] for d in out_dict])
-        tim_concat = np.concatenate([out_dict[d][col.TIM] for d in out_dict])
-        cls_all = np.concatenate([out_dict[d][col.CLS_ALL] for d in out_dict])
-        cls_meas = np.concatenate([out_dict[d][col.CLS_MEAS] for d in out_dict])
-        cls_tid2_meas = np.concatenate([out_dict[d][col.CLS_TID2_MEAS] for d in out_dict])
-        cls_tid2_all = np.concatenate([out_dict[d][col.CLS_TID2_ALL] for d in out_dict])
-        se = np.concatenate([out_dict[d][col.SE] for d in out_dict])
-        nl = np.concatenate([out_dict[d][col.NL] for d in out_dict])
-
-        # concatenate positions
-        x = np.ascontiguousarray(pos_concat[:, 0], dtype = np.float64)
-        y = np.ascontiguousarray(pos_concat[:, 1], dtype = np.float64)
-        z = np.ascontiguousarray(pos_concat[:, 2], dtype = np.float64)
-        #se_xyz = np.ascontiguousarray(se_xyz)
-
-        keys = list(out_dict.keys())
-        lp1_p2 = [len(out_dict[k][lcoord]) for k in keys]
-        p = np.repeat(range(1, len(keys)+1), [len(out_dict[k][lcoord]) for k in keys])
-        # No string output
-
-        hl.pointsToVTK(file_path + '_' + lcoord, x, y, z, data={'wash': p,
-                                                 col.TID2: tid_concat,
-                                                 col.TIM: tim_concat,
-                                                 col.SE: se,
-                                                 'se_norm': se/np.max(se),
-                                                 col.NL: nl,
-                                                 'nl_norm': nl/np.max(nl),
-                                                 col.CLS_ALL: cls_all,
-                                                 col.CLS_MEAS: cls_meas,
-                                                 col.CLS_TID2_ALL: cls_tid2_all,
-                                                 col.CLS_TID2_MEAS: cls_tid2_meas
-                                                 })
-        for label in out_dict:
+        # export one file per wash
+        idx = 0
+        for label in in_dict:
+            idx += 1
             # concatenate positions
-            pos_concat = np.array(out_dict[label][lcoord])
+            pos_concat = np.array(in_dict[label][coord])
             x = np.ascontiguousarray(pos_concat[:, 0], dtype=np.float64)
             y = np.ascontiguousarray(pos_concat[:, 1], dtype=np.float64)
             z = np.ascontiguousarray(pos_concat[:, 2], dtype=np.float64)
+            pview_dict = {}
+            for column in export_column:
+                pview_dict[column] = np.array(in_dict[label][column])
+            pview_dict['wash'] = np.repeat(idx, len(in_dict[label][coord]))
 
-            hl.pointsToVTK(file_path + '_' + lcoord + '_' + label, x, y, z,
-                           data={col.TID2: np.array(out_dict[label][col.TID2]),
-                                 col.TIM: np.array(out_dict[label][col.TIM]),
-                                 col.SE: np.array(out_dict[label][col.SE]),
-                                 'se_norm': np.array(out_dict[label][col.SE])/np.max(se),
-                                 col.NL: np.array(out_dict[label][col.NL]),
-                                 'nl_norm': np.array(out_dict[label][col.NL]/np.max(nl)),
-                                 col.CLS_ALL: np.array(out_dict[label][col.CLS_ALL]),
-                                 col.CLS_MEAS: np.array(out_dict[label][col.CLS_MEAS]),
-                                 col.CLS_TID2_ALL:np.array(out_dict[label][col.CLS_TID2_ALL]),
-                                 col.CLS_TID2_MEAS: np.array(out_dict[label][col.CLS_TID2_MEAS])
-                                 })
+            hl.pointsToVTK(file_path + '_' + coord + '_' + label, x, y, z,
+                           data=pview_dict)
+
 
 if __name__ == "__main__":
+
     os.environ["OMP_NUM_THREADS"] = '1'
     pl = ProcessLocalizations(
         'Z:/siva_minflux/analysis//Multiwash/Syp_ATG9/220510_Syp_ATG9_ROI01\\220510_Syp_ATG9_ROI01.npy')
+
+    pl.log_parameters()
     pl.trim_min_localizations()
-    #pl.cluster_tid(method=pl.CLS_METHOD_BAYES_GMM)
-    #pl.cluster_meas(method=pl.CLS_METHOD_DBSCAN)
-    #pl.cluster_all(method=pl.CLS_METHOD_DBSCAN)
-    #pl.cluster_all_intersect(col.CLS_ALL)
-    pl.DBCLUSTER_EPS_ALL = 3e-8
-    pl.DBCLUSTER_EPS_MEAS = 3e-8
-    out_dict = pl.summary_per_tid2()
-    pl.export_table(out_dict)
-    #pl.export_vtu(out_dict=out_dict, lcoord=col.LTR, file_path='Z:/siva_minflux/analysis//Multiwash/Syp_ATG9/220510_Syp_ATG9_ROI01\\220510_Syp_ATG9_ROI01_ltr')
+    pl.cluster_tid(method=pl.CLS_METHOD_BAYES_GMM)
+    pl.cluster_meas(method=pl.CLS_METHOD_DBSCAN)
+    pl.cluster_all(method=pl.CLS_METHOD_DBSCAN)
+    pl.cluster_all_intersect(col.CLS_ALL)
+    pl.DBCLUSTER_EPS_MERGED_MEAS = 3e-8
+    pl.DBCLUSTER_EPS_MERGED_ALL = 3e-8
+    pl.log_parameters()
+    summary_dict = pl.summary_per_tid2()
+    pl.export_csv(summary_dict, file_path=pl.file_path_no_ext())
+    pl.export_vtu(in_dict=summary_dict, coord=col.LTR, file_path=pl.file_path_no_ext())
 
     #summary = pl.summary_per_tid2()
 
