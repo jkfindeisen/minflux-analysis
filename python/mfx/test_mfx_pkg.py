@@ -1,4 +1,4 @@
-from ..mfx.mfxdata import MfxData
+from mfx.mfxdata import MfxData
 import time
 
 t0 = time.time()
