@@ -23,8 +23,8 @@ from scipy.spatial import distance_matrix
 
 
 class MfxData:
-    # class variable shared by all instances
-    MAX_TDIFF_REF = 10    # time difference between final record of ref (beads) and mfx recording in sec.
+    # class variables, i.e. shared by all instances
+
     CORRECT_Z_POSITION_FACTOR = 0.7 # Correction due to oil water RI difference
     CORRECT_Z_POSITION_FACTOR_REF = 0.7
     TRANS = 'translate'
@@ -33,6 +33,7 @@ class MfxData:
 
     def __init__(self, file_path, outdir_main=None, zarr_dir_main=None):
         # instance variables
+        self.MAX_TDIFF_REF = 10    # time difference between final record of ref (beads) and mfx recording in sec.
         self.ref_all = {}          # stores ref beads
         self.mfx_all = {}          # stores mfx measurements all washes
         self.valid_ref_beads = {}  # Beads recording that fulfill minimal requirements
