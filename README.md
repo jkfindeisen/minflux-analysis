@@ -131,6 +131,7 @@ Tools for the data processing
 conda install -c conda-forge scikit-learn 
 conda install -c conda-forge numpy
 conda install -c conda-forge matplotlib
+conda install pandas
 ```
 
 Imspector specific package
