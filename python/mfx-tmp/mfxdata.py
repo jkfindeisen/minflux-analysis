@@ -16,7 +16,7 @@ import math
 from matplotlib import pyplot as plt
 import warnings
 from evtk import hl
-import mfxcolnames as col
+from mfx.mfxcolnames as col
 import re
 import time
 from scipy.spatial import distance_matrix
