@@ -36,6 +36,9 @@ class ProcessLocalizations:
         self.DBCLUSTER_EPS_MERGED_MEAS = 2e-8 # dbscan eps for clustering merged localizations in all measurements
 
         self.loc = np.load(file_path, allow_pickle=True).item()
+        if 'ref_error' in self.loc.keys():
+            self.ref_error = self.loc['ref_error']
+            del self.loc['ref_error']
 
         # add clustering columns initialize with no clusters
         for label in self.loc:
@@ -401,23 +404,27 @@ class ProcessLocalizations:
                 summary[label][col.SE_XYZ].append(se_xyz)
                 summary[label][col.CLS_MEAS].append(self.loc[label][col.CLS_MEAS][tid_idxs][0])
                 summary[label][col.CLS_ALL].append(self.loc[label][col.CLS_ALL][tid_idxs][0])
+                summary[label][col.CLS_MERGED_MEAS].append(self.loc[label][col.CLS_MERGED_MEAS][tid_idxs][0])
+                summary[label][col.CLS_MERGED_ALL].append(self.loc[label][col.CLS_MERGED_ALL][tid_idxs][0])
 
 
 
-        # cluster single wash measurement at the level of merged localizations
+
+                # cluster single wash measurement at the level of merged localizations
         for label in summary:
             summary[label][col.CLS_MERGED_MEAS] = self.dbscan(summary[label][col.LTR],
                                                               eps=self.DBCLUSTER_EPS_MERGED_MEAS, min_samples=1)
 
 
         # cluster combined wash at the level of merged localizations
-        loc_all = np.concatenate([summary[label][col.LTR] for label in summary])
-        cls_idx = self.dbscan(loc_all, eps=self.DBCLUSTER_EPS_MERGED_ALL, min_samples=1)
-        istart = 0
-        for label in summary:
-            iend = istart + len(summary[label][col.CLS_ALL])
-            summary[label][col.CLS_MERGED_ALL] = cls_idx[range(istart, iend)]
-            istart = iend
+        if len(summary.keys()) > 1:
+            loc_all = np.concatenate([summary[label][col.LTR] for label in summary])
+            cls_idx = self.dbscan(loc_all, eps=self.DBCLUSTER_EPS_MERGED_ALL, min_samples=1)
+            istart = 0
+            for label in summary:
+                iend = istart + len(summary[label][col.CLS_ALL])
+                summary[label][col.CLS_MERGED_ALL] = cls_idx[range(istart, iend)]
+                istart = iend
         return summary
 
     def export_csv(self, in_dict, file_path):
