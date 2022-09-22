@@ -4,3 +4,5 @@ Thumbs.db
 .ipynb_checkpoints*
 __pycache__
 *egg-info*
+.Rhistory
+*nb.html
