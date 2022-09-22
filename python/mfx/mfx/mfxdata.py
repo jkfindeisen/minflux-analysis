@@ -180,7 +180,7 @@ class MfxData:
         pos_array[:, :, 2] = pos_array[:, :, 2]*self.CORRECT_Z_POSITION_FACTOR_REF
         return [time_vector, pos_array, time_std_vector]
 
-    def compute_ref_transform_error(self, pos_array):
+    def compute_pos_error(self, pos_array):
         """
         Some metrics to asses how stable the beads are
         :param pos_array:
@@ -243,6 +243,13 @@ class MfxData:
         pos_array_reg = self.apply_ref_rotate(rotate, pos_array_reg.copy(), time_vector)
         return pos_array_reg
 
+    def ref_transform_error(self, translate):
+        [time_vector, pos_array, time_std_vector] = self.get_ref()
+        pos_array_translate = np.zeros_like(pos_array)
+        for idx in range(0, pos_array.shape[1]):
+            pos_array_translate[:, idx] = self.apply_ref_translate(translate, pos_array[:, idx],time_vector)
+        return self.compute_pos_error(pos_array_translate)
+
     def show_ref_transform(self, translate, rotate, show=False, save=False):
         if not save and not show:
             return
@@ -278,7 +285,7 @@ class MfxData:
             ax[0].set_ylabel(labels[ax_idx])
 
 
-        ref_error = [self.compute_ref_transform_error(obj) for obj in obj_to_plot]
+        ref_error = [self.compute_pos_error(obj) for obj in obj_to_plot]
         for iobj in range(len(obj_to_plot)):
             axs[0][iobj].set_title(titles[iobj] % (ref_error[iobj]['std_xy'] * math.pow(10, 9),
                                                    ref_error[iobj]['std_z'] * math.pow(10, 9),
@@ -356,6 +363,7 @@ class MfxData:
                 out_dic[label][col.LRE] = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
                                                                    out_dic[label][col.LNC],
                                                                    out_dic[label][col.TIM_TID_MEAN])
+        out_dic['ref_error'] = self.ref_transform_error(register[self.TRANS])
         return out_dic
 
     def get_meantime_trackid(self, tid, tim):
@@ -388,7 +396,7 @@ class MfxData:
         flat_pos2 = np.reshape(pos_array2, (pos_array2.shape[0]*pos_array2.shape[1], pos_array2.shape[2]))
 
         out_dict = {col.TIM: time_vector, col.LNC: flat_pos2, col.LTR: flat_pos_trans, col.LRE: flat_pos_reg}
-        scipy.io.savemat(os.path.join(self.outdir, self.msrfile_name + "_ref.mat"), out_dict)
+        np.save(os.path.join(self.outdir, self.msrfile_name + "_ref.npy"), out_dict)
 
 
 
