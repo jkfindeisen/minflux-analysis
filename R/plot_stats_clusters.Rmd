@@ -1,0 +1,184 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library('plotly')
+library(htmlwidgets)
+library(webshot)
+setwd("T:/Antonio_Politi/Code/minflux-analysis/R/")
+source("tools_clusterstat.R")
+
+
+
+```
+
+```{r read files}
+# cycle through the cluster and extract some stats. Plot hist
+cls_use = col.CLS_MERGED_MEAS
+
+eps_all <-  c(2,5, 10, 20, 30, 40, 50, 100)
+prot = 'ATG9'
+mdir <- paste0('Z:/siva_minflux/analysis/Single wash/', prot)
+
+cls_stats_all_eps <- list()
+for (eps in eps_all) {
+  csv_files <- list.files(pattern = paste0("_eps", eps, '.csv'), recursive = TRUE, path = mdir, full.names = TRUE)
+  
+  cls_stats_all <- cluster_stats_set(csv_files, cls_type = cls_use)
+  cls_stats_all$eps <- eps
+  cls_stats_all_eps <- rbind(cls_stats_all_eps, cls_stats_all)
+}
+
+```
+
+```{r}
+
+p <- ggplot()
+for (epsv in c(10, 20, 30, 40, 50)) {
+  datasub <- subset(cls_stats_all_eps, cls_stats_all_eps$eps==epsv)
+  p <- p + geom_histogram(data = datasub, 
+                          aes(x = n, weight =n, fill=factor(eps), y = ..count../sum(..count..)), alpha = alpha_v)
+}
+p <- p + xlab('number of events per cluster')
+p <- p + scale_x_log10()
+p <- p + scale_fill_discrete(name = 'dbscan radius eps (nm)')
+p <- p + ylab('fraction of events in cluster')
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p
+ggsave(p, filename = file.path(mdir, paste0(prot, '_fraction_events_per_cluster_size_dist.pdf')))
+ggsave(p, filename = file.path(mdir, paste0(prot, '_fraction_events_per_cluster_size_dist.png')))
+
+
+p <- ggplot()
+for (epsv in c(30)) {
+  datasub <- subset(cls_stats_all_eps, cls_stats_all_eps$eps==epsv)
+  p <- p + geom_histogram(data = datasub, 
+                          aes(x = n, weight =n, fill=factor(eps), y = ..count../sum(..count..)), alpha = alpha_v)
+}
+p <- p + xlab('number of events per cluster')
+p <- p + scale_x_log10()
+p <- p + scale_fill_discrete(name = 'dbscan radius eps (nm)')
+p <- p + ylab('fraction of events in cluster')
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p
+ggsave(p, filename = file.path(mdir, paste0(prot, '_fraction_events_per_cluster_size_dist', epsv, '.pdf')))
+ggsave(p, filename = file.path(mdir, paste0(prot, '_fraction_events_per_cluster_size_dist', epsv, '.png')))
+
+p <- ggplot()
+for (epsv in c(10, 20, 30, 40, 50)) {
+  datasub <- subset(cls_stats_all_eps, cls_stats_all_eps$eps==epsv)
+  p <- p + geom_histogram(data = datasub, 
+                          aes(x = n,  fill=factor(eps), y = ..count../sum(..count..)), alpha = alpha_v)
+}
+p <- p + geom_histogram(aes(y = ..count../sum(..count..)))
+p <- p + xlab('Number of events per cluster')
+p <- p + ylab('Fraction')
+p <- p +  scale_x_log10()
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p
+ggsave(p, filename = file.path(mdir, paste0(prot, '_cluster_event_dist.pdf')))
+ggsave(p, filename = file.path(mdir, paste0(prot, '_cluster_event_dist.png')))
+
+p <- ggplot()
+for (epsv in c(30)) {
+  datasub <- subset(cls_stats_all_eps, cls_stats_all_eps$eps==epsv)
+  p <- p + geom_histogram(data = datasub, 
+                          aes(x = n,  fill=factor(eps), y = ..count../sum(..count..)), alpha = alpha_v)
+}
+p <- p + geom_histogram(aes(y = ..count../sum(..count..)))
+p <- p + xlab('Number of events per cluster')
+p <- p + ylab('Fraction')
+p <- p +  scale_x_log10()
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p
+ggsave(p, filename = file.path(mdir, paste0(prot, '_cluster_event_dist_eps', epsv, '.pdf')))
+ggsave(p, filename = file.path(mdir, paste0(prot, '_cluster_event_dist_eps', epsv, '.png')))
+
+    
+
+```
+
+
+
+```{r}
+alpha_v <- 0.5
+p <- ggplot()
+for (epsv in c(10, 20, 30, 40 ,50)) {
+  datasub <- subset(cls_stats_all_eps, as.logical((cls_stats_all_eps$n>=2) * (cls_stats_all_eps$eps==epsv)))
+  p <- p + geom_histogram(data = datasub , aes(x = PCA1_nm, fill=factor(eps), y = ..count../sum(..count..)), alpha = alpha_v)
+}
+p <- p + xlab('cluster radius (nm)')
+p <- p + scale_x_log10()
+p <- p + scale_fill_discrete(name = 'dbscan radius eps (nm)')
+p <- p + ylab('fraction')
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p
+ggsave(p, filename = file.path(mdir, paste0(prot, '_radius_nm.pdf')))
+ggsave(p, filename = file.path(mdir, paste0(prot, '_radius_nm.png')))
+
+p <- ggplot()
+for (epsv in c(30)) {
+  
+  p <- p + geom_histogram(data = subset(cls_stats_all_eps, as.logical((cls_stats_all_eps$n>=2) * (cls_stats_all_eps$eps==epsv))), aes(x = PCA1_nm, fill=factor(eps), y = ..count../sum(..count..)), alpha = alpha_v)
+}
+p <- p + xlab('cluster radius (nm)')
+p <- p + scale_x_log10()
+p <- p + scale_fill_discrete(name = 'dbscan radius eps (nm)')
+p <- p + ylab('fraction')
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p
+ggsave(p, filename = file.path(mdir, paste0(prot, '_longest_radius_nm_eps', epsv, '.pdf')))
+ggsave(p, filename = file.path(mdir, paste0(prot, '_longest_radius_nm_eps', epsv, '.png')))
+
+
+p <- ggplot()
+for (epsv in c(10, 20, 30, 40 ,50)) {
+  
+  p <- p + geom_histogram(data = subset(cls_stats_all_eps, as.logical((cls_stats_all_eps$n>=2) * (cls_stats_all_eps$eps==epsv))), aes(x = longest_radius_nm, fill=factor(eps), y = ..count../sum(..count..)), alpha = alpha_v)
+}
+p <- p + xlab('cluster maximal radius (nm)')
+p <- p + scale_x_log10()
+p <- p + scale_fill_discrete(name = 'dbscan radius eps (nm)')
+p <- p + ylab('fraction')
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p
+ggsave(p, filename = file.path(mdir, paste0(prot, '_longest_radius_nm.pdf')))
+ggsave(p, filename = file.path(mdir, paste0(prot, '_longest_radius_nm.png')))
+
+p <- ggplot()
+for (epsv in c(30)) {
+  
+  p <- p + geom_histogram(data = subset(cls_stats_all_eps, as.logical((cls_stats_all_eps$n>=2) * (cls_stats_all_eps$eps==epsv))), aes(x = longest_radius_nm, fill=factor(eps), y = ..count../sum(..count..)), alpha = alpha_v)
+}
+p <- p + xlab('cluster maximal radius (nm)')
+p <- p + scale_x_log10()
+p <- p + scale_fill_discrete(name = 'dbscan radius eps (nm)')
+p <- p + ylab('fraction')
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p
+ggsave(p, filename = file.path(mdir, paste0(prot, '_longest_radius_nm_eps', epsv, '.pdf')))
+ggsave(p, filename = file.path(mdir, paste0(prot, '_longest_radius_nm_eps', epsv, '.png')))
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
