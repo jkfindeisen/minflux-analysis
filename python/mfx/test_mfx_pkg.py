@@ -30,6 +30,7 @@ pl.DBCLUSTER_EPS_MEAS = 2e-9
 pl.cluster_meas(method=pl.CLS_METHOD_DBSCAN)
 pl.cluster_all(method=pl.CLS_METHOD_DBSCAN)
 pl.cluster_all_intersect(col.CLS_ALL)
+pl.summary_per_tid2()
 #pl.DBCLUSTER_EPS_MERGED_MEAS = 3e-8
 #pl.DBCLUSTER_EPS_MERGED_ALL = 3e-8
 #pl.log_parameters()
