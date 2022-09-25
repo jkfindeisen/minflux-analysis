@@ -33,15 +33,22 @@ cluster_stats <- function(afile, cls_type){
   cls_stats$PCA2_nm <- 0
   cls_stats$PCA3_nm <- 0
   cls_stats$PCA_vol_um3 <- 0
-  
+  cls_stats$centroid_x <- 0
+  cls_stats$centroid_y <- 0
+  cls_stats$centroid_z <- 0
+    
   
   for (irow in seq(1, nrow(cls_stats))) {
     # to compute object you need at least 3 points > 3
     
+    clust_coord = data[data[cls_type]==cls_stats[irow, cls_type], c('ltr_x', 'ltr_y', 'ltr_z') ]
+    cls_stats[irow, c('centroid_x', 'centroid_y', 'centroid_z')] <-
+      c(mean(clust_coord$ltr_x), mean(clust_coord$ltr_y), mean(clust_coord$ltr_z))
+    
     if(cls_stats$n[irow] < 2){
       next
     }
-    clust_coord = data[data[cls_type]==cls_stats[irow, cls_type], c('ltr_x', 'ltr_y', 'ltr_z') ]
+    
     PCA <- prcomp(clust_coord)
     dd <- dist(clust_coord)
     max_radius <- max(dd)/2
@@ -64,4 +71,3 @@ cluster_stats_set <- function(files, cls_type){
   }
   return(cls_stats_all)
 }
-
