@@ -49,10 +49,19 @@ class ProcessLocalizations:
             self.loc[label][col.CLS_MERGED_ALL] = np.ones(self.loc[label][col.VLD].shape)*(-1)
             self.loc[label][col.TID2] = np.ones(self.loc[label][col.VLD].shape)*(-1)
         self.set_tid2()
+        self.translate_to_origin()
         self.logger = logging.getLogger('processlocalizations')
 
         self.set_logger()
 
+    def translate_to_origin(self, coord = col.LTR):
+        # This is useful so that the lowest point is always at 0,0,0
+        col_to_translate = [col.LTR, col.LNC, col.LOC, col.LRE]
+        for col_name in col_to_translate:
+            pos_concat = np.concatenate([self.loc[d][col_name] for d in self.loc])
+            origin = np.min(pos_concat, axis = 0)
+            for label in self.loc:
+                self.loc[label][col_name] = self.loc[label][col_name] - origin
 
     def set_logger(self):
         log_fmt = "%(asctime)s [%(levelname)s] **** %(funcName)s ****\n%(message)s"
@@ -169,23 +178,23 @@ class ProcessLocalizations:
 
     def set_tid2(self):
         # Set index of track accounting for splitting within a track
-        tid = 0
+        tid2 = 0
         for label in self.loc:
             uid, idxs, counts = np.unique(self.loc[label][col.TID], return_index=True, return_counts=True)
-            for i, idx in enumerate(idxs):
-                tid_idxs = list(range(idx, idx+counts[i]))
+            for tid1 in uid:
+                tid_idxs = (self.loc[label][col.TID] == tid1)
                 uid_cls, idxs_cls, counts_cls = np.unique(self.loc[label][col.CLS_TRACK][tid_idxs],
                                                           return_index=True, return_counts=True)
                 if len(uid_cls) == 1:
-                    self.loc[label][col.TID2][tid_idxs] = tid
-                    tid += 1
+                    self.loc[label][col.TID2][tid_idxs] = tid2
+                    tid2 += 1
                     continue
                 else:
                     cls = self.loc[label][col.CLS_TRACK][tid_idxs]
                     tid_assign = cls.copy()
                     for i_cls in range(0, 10):
-                        tid_assign[cls == i_cls] = tid
-                        tid = tid + 1
+                        tid_assign[cls == i_cls] = tid2
+                        tid2 = tid2 + 1
                     self.loc[label][col.TID2][tid_idxs] = tid_assign
 
     def cluster_meas(self, method):
@@ -427,6 +436,17 @@ class ProcessLocalizations:
                 istart = iend
         return summary
 
+    @staticmethod
+    def filter_summary_loc(in_dict, filter_cluster):
+        out_dict = in_dict.copy()
+        for label in in_dict:
+            uid, counts = np.unique(in_dict[label][filter_cluster['name']], return_counts=True)
+            uid_valid = uid[counts >= filter_cluster['size']]
+            idx_valid = np.where(np.in1d(in_dict[label][filter_cluster['name']], uid_valid))[0]
+            for col_name in in_dict[label]:
+                out_dict[label][col_name] = np.array(in_dict[label][col_name])[idx_valid.astype(int)]
+        return out_dict
+
     def export_csv(self, in_dict, file_path):
         print('export csv table')
         keys = list(in_dict.keys())
@@ -442,41 +462,61 @@ class ProcessLocalizations:
             else:
                 df.to_csv(file_path + '.csv', mode='a', index=False, header=False)
 
-    def export_vtu(self, in_dict, coord, file_path):
+    def export_vtu(self, in_dict, coord, file_path, unit=col.UNIT_M):
+        # TODO: Filter by cluster size. Typically clusters of size <2 are singletons
         print('export paraview file')
         # export one single file
         export_column = [col.TID2, col.TIM, col.CLS_ALL, col.CLS_MEAS,
                          col.CLS_MERGED_MEAS, col.CLS_MERGED_ALL, col.SE, col.NL]
-        # export to vtk format for view in paraview, ideally also clustering etc.
-        pos = np.concatenate([in_dict[d][coord] for d in in_dict])
-        x = np.ascontiguousarray(pos[:, 0], dtype = np.float64)
-        y = np.ascontiguousarray(pos[:, 1], dtype = np.float64)
-        z = np.ascontiguousarray(pos[:, 2], dtype = np.float64)
-        pview_dict = {}
-        for column in export_column:
-            pview_dict[column] = np.concatenate([in_dict[d][column] for d in in_dict])
-        keys = list(in_dict.keys())
-        pview_dict['wash'] = np.repeat(range(1, len(keys)+1), [len(in_dict[k][coord]) for k in keys])
-        pview_dict['se_norm'] = pview_dict['se']/np.max(pview_dict['se'])
-        pview_dict['nl_norm'] = pview_dict['nl']/np.max(pview_dict['nl'])
-        hl.pointsToVTK(file_path + '_' + coord, x, y, z, data=pview_dict)
-
         # export one file per wash
-        idx = 0
+
+        if unit == col.UNIT_M:
+            factor_unit = 1
+        if unit == col.UNIT_UM:
+            factor_unit = 1e6
+        if unit == col.UNIT_NM:
+            factor_unit = 1e9
+
+        label_idx = 0
         for label in in_dict:
-            idx += 1
+            label_idx += 1
             # concatenate positions
-            pos_concat = np.array(in_dict[label][coord])
+            pos_concat = np.array(in_dict[label][coord])*factor_unit
             x = np.ascontiguousarray(pos_concat[:, 0], dtype=np.float64)
             y = np.ascontiguousarray(pos_concat[:, 1], dtype=np.float64)
             z = np.ascontiguousarray(pos_concat[:, 2], dtype=np.float64)
             pview_dict = {}
             for column in export_column:
-                pview_dict[column] = np.array(in_dict[label][column])
-            pview_dict['wash'] = np.repeat(idx, len(in_dict[label][coord]))
+                if column == col.SE:
+                    pview_dict[column] = np.array(in_dict[label][column])*factor_unit
+                else:
+                    pview_dict[column] = np.array(in_dict[label][column])
 
+            pview_dict['wash'] = np.repeat(label_idx, len(in_dict[label][coord]))
+            pview_dict['se_norm'] = pview_dict['se']/np.max(pview_dict['se'])
+            pview_dict['nl_norm'] = pview_dict['nl']/np.max(pview_dict['nl'])
             hl.pointsToVTK(file_path + '_' + coord + '_' + label, x, y, z,
                            data=pview_dict)
+        if len(in_dict) > 1:
+            # concatenate all washes
+            # export to vtk format for view in paraview, ideally also clustering etc.
+            pos = np.concatenate([in_dict[d][coord] for d in in_dict])*factor_unit
+            x = np.ascontiguousarray(pos[:, 0], dtype=np.float64)
+            y = np.ascontiguousarray(pos[:, 1], dtype=np.float64)
+            z = np.ascontiguousarray(pos[:, 2], dtype=np.float64)
+            pview_dict = {}
+            for column in export_column:
+                if column == col.SE:
+                    pview_dict[column] = np.array([in_dict[d][column] for d in in_dict])*factor_unit
+                else:
+                    pview_dict[column] = np.concatenate([in_dict[d][column] for d in in_dict])
+            keys = list(in_dict.keys())
+            pview_dict['wash'] = np.repeat(range(1, len(keys)+1), [len(in_dict[k][coord]) for k in keys])
+            pview_dict['se_norm'] = pview_dict['se']/np.max(pview_dict['se'])
+            pview_dict['nl_norm'] = pview_dict['nl']/np.max(pview_dict['nl'])
+            hl.pointsToVTK(file_path + '_' + coord, x, y, z, data=pview_dict)
+
+
 
 
 

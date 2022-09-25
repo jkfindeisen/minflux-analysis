@@ -26,3 +26,6 @@ SE = 'se'              # standard error through all dimensions   std/sqt(NL)
 NL = 'nl'               # number of localizations
 STD_XYZ = 'std_xyz'         # standard deviation in [std_x, std_y, std_z]
 SE_XYZ = 'se_xyz'           # standard error in X
+UNIT_NM = 'nm'
+UNIT_UM = 'um'
+UNIT_M  = 'm'
