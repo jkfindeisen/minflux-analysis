@@ -1,0 +1,222 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library('plotly')
+library(htmlwidgets)
+library(webshot)
+
+# Edit this path accordingly to match local folder 
+setwd("T:/Antonio_Politi/Code/minflux-analysis/R/")
+source("tools_clusterstat.R")
+
+save_figure <- function(plot_fig, prot, postfix, w, h) {
+  ggsave(plot_fig, filename = file.path(outdir, paste0(prot, postfix, '.pdf')), width = w, height = h, unit = 'cm')
+  ggsave(plot_fig, filename = file.path(outdir, paste0(prot, postfix, '.png')), width = w, height = h, unit = 'cm')
+  
+}
+
+
+
+
+```
+
+```{r read files}
+# cycle through the cluster and extract some stats. Plot hist
+cls_use = col.CLS_MERGED_ALL
+
+eps_all <-  c(10, 20, 30, 40, 50, 60, 70, 80)
+
+epsv <-  40 # For plots
+min_clst_n <- 3 # Do not compute size for cluster with less than this number of events
+#
+#prot = 'VGLUT1_VGLUT1'
+#prot = 'ZnT3_Syp'
+#prot = 'Syp_Picc'
+prot = 'Syp_ATG9'
+mdir <- file.path('Z:/siva_minflux/analysis/Multiwash/', prot)
+outdir <- file.path('Z:/siva_minflux/analysis/Multiwash/', prot, 'figures')
+
+
+if (!dir.exists(outdir)) {
+  dir.create(outdir)
+}
+
+cls_stats_all_eps <- list()
+for (eps in eps_all) {
+  csv_files <- list.files(pattern = paste0("_eps", eps, '.csv'), recursive = TRUE, path = mdir, full.names = TRUE)
+  cls_stats_all <- cluster_stats_set(csv_files, cls_type = cls_use)
+  cls_stats_all$eps <- eps
+  cls_stats_all_eps <- rbind(cls_stats_all_eps, cls_stats_all)
+}
+
+
+
+
+```
+
+```{r aggregate according to experiment and eps}
+
+eps_to_plot <- eps_all
+nr_aggregate <- data.frame()
+min_clst_n <- 3
+for (aeps  in eps_to_plot) {
+  
+  datasub <- subset(cls_stats_all_eps, as.logical((cls_stats_all_eps$n>=min_clst_n ) * (cls_stats_all_eps$eps == aeps)))
+  
+  ufile <- unique(datasub$file)
+  
+  idx_P1P2 <- (datasub$P1>0) & (datasub$P2>0)
+  idx_P1 <- (datasub$P2==0) & (datasub$P1>0)
+  idx_P2 <- (datasub$P2>0) & (datasub$P1==0)
+
+  nr_aggregate <- rbind(nr_aggregate, data.frame(eps = aeps, 
+                                        nloc = sum(datasub$n),
+                                        P1_nloc =  sum(datasub$P1), 
+                                        P1_nloc_P1P2_clust =  sum(datasub$P1[idx_P1P2]), 
+                                        P1_nloc_P1only_clust = sum(datasub$P1[idx_P1]), 
+                                        P2_nloc = sum(datasub$P2), 
+                                        P2_nloc_P1P2_clust = sum(datasub$P2[idx_P1P2]), 
+                                        P2_nloc_P2only_clust = sum(datasub$P2[idx_P2]),
+                                        nclust = length(datasub$n), 
+                                        P1P2_nclust = sum(idx_P1P2), 
+                                        P1only_nclust = sum(idx_P1), 
+                                        P2only_nclust = sum(idx_P2),
+                                      fname = 'allfiles'))
+    
+
+  
+  for (afile in ufile) {
+    datasub_file <- subset(datasub, file == afile)
+  
+    idx_P1P2 <- (datasub_file$P1>0) & (datasub_file$P2>0)
+    idx_P1 <- (datasub_file$P2==0) & (datasub_file$P1>0)
+    idx_P2 <- (datasub_file$P2>0) & (datasub_file$P1==0)
+    
+    nr_aggregate <- rbind(nr_aggregate, data.frame(eps = aeps,
+                                        nloc = sum(datasub_file$n),
+                                        P1_nloc =  sum(datasub_file$P1), 
+                                        P1_nloc_P1P2_clust =  sum(datasub_file$P1[idx_P1P2]), 
+                                        P1_nloc_P1only_clust = sum(datasub_file$P1[idx_P1]), 
+                                        P2_nloc = sum(datasub_file$P2), 
+                                        P2_nloc_P1P2_clust = sum(datasub_file$P2[idx_P1P2]), 
+                                        P2_nloc_P2only_clust = sum(datasub_file$P2[idx_P2]),
+                                        nclust = length(datasub_file$n), 
+                                        P1P2_nclust = sum(idx_P1P2), 
+                                        P1only_nclust = sum(idx_P1), 
+                                        P2only_nclust = sum(idx_P2),
+                                        fname = afile))
+    
+
+  }
+}
+
+```
+
+```{r export the data}
+write.csv(x = cls_stats_all_eps, file = file.path(outdir, paste0(prot, '_raw_coloc_data.csv' )), row.names = FALSE)
+write.csv(x =  nr_aggregate, file = file.path(outdir, paste0(prot, '_aggregate_coloc_data.csv' )), row.names = FALSE)
+
+```
+
+
+```{r}
+nr
+
+```
+
+
+```{r colocalization of clusters of function of eps}
+eps_to_plot <- eps_all
+nr_clusters <- data.frame()
+nr_loc <- data.frame()
+min_clst_n <- 3
+for (aeps  in eps_all) {
+datasub <- subset(cls_stats_all_eps, as.logical((cls_stats_all_eps$n>=min_clst_n ) * (cls_stats_all_eps$eps == aeps)))
+
+idx_P1P2 <- (datasub$P1>0) & (datasub$P2>0)
+idx_P1 <- (datasub$P2==0) & (datasub$P1>0)
+idx_P2 <- (datasub$P2>0) & (datasub$P1==0)
+
+nr_clusters <- rbind(nr_clusters, data.frame(eps = aeps, 
+                                    nclust = length(datasub$n), 
+                                    nclust_P1P2 = sum(idx_P1P2), 
+                                    nclust_P1_only = sum(idx_P1), 
+                                    nclust_P2_only = sum(idx_P2)))
+
+nr_loc <- rbind(nr_loc, data.frame(eps = aeps, nloc = sum(datasub$n), 
+                          nloc_P1P2 = sum(datasub$n[idx_P1P2]), 
+                          nloc_P1_only = sum(datasub$n[idx_P1]), 
+                          nloc_P2_only = sum(datasub$n[idx_P2])))
+}
+
+#Colocalization 
+
+# Normalize 
+nr_loc[, c('nloc_P1P2', 'nloc_P1_only', 'nloc_P2_only') ] <- nr_loc[, c('nloc_P1P2', 'nloc_P1_only', 'nloc_P2_only') ]/nr_loc$nloc
+
+tmp <- reshape2::melt(nr_loc, id.vars = 'eps', measure.vars= c( 'nloc_P1P2', 'nloc_P2_only','nloc_P1_only' ))
+tmp$variable <- factor(tmp$variable, levels = c('nloc_P1P2', 'nloc_P1_only', 'nloc_P2_only'))
+p <- ggplot(data = tmp, aes(x = eps, y = value, fill = variable))
+p <- p + theme_bw()
+p <- p + scale_fill_discrete(name='', 
+                             breaks =  c('nloc_P1P2', 'nloc_P1_only', 'nloc_P2_only'), 
+                             labels  = c('P1 and P2', 'P1 only', 'P2 only'))
+p <- p + ylab('Fraction')
+p <- p + xlab('dbscan radius eps (nm)')
+p <- p + ggtitle(prot)
+p <- p  + geom_bar(stat = 'identity' )
+
+
+p
+ggsave(p, file = file.path(outdir, paste0(prot, '_coloc_min_clst_n', min_clst_n, '.png')))
+ggsave(p, file = file.path(outdir, paste0(prot, '_coloc_min_clst_n', min_clst_n,'.pdf')))
+
+
+```
+
+
+
+
+```{r Plot for a specific eps of localizations}
+datain <- cluster_stats(csv_files[1], cls_type = col.CLS_MERGED_MEAS)
+P1_name <- datain$protname[datain$id_wash==1][1]
+P2_name <- datain$protname[datain$id_wash==2][2]
+epsv = 40
+tmp <- reshape2::melt(nr_loc, id.vars = 'eps', measure.vars= c( 'nloc_P1P2', 'nloc_P2_only','nloc_P1_only' ))
+p <- ggplot() 
+p <- p + geom_bar(data = tmp[tmp$eps== epsv,], aes(x =variable, y = value, fill = variable ),  
+                  stat = 'identity', color = 'black', show.legend = FALSE)
+p <- p + scale_y_continuous(limits = c(0,1))
+p <- p + ylab('fraction of events' )
+p <- p + xlab('cluster')
+p <- p + scale_x_discrete(labels = c(paste0(P1_name, ' and\n', P2_name), 
+                                     paste(P1_name, 'only'), 
+                                     paste(P2_name, 'only')))
+p <- p + scale_fill_manual(values = c('white', 'lightgreen', 'magenta'))
+p <- p + theme_bw()
+p <- p + theme(panel.grid = element_blank())
+p
+ggsave(p, file = file.path(outdir, paste0(prot, '_coloc_min_clst_n', min_clst_n, 'eps',epsv,  '.png')),        width = 10, height = 10, unit = 'cm')
+ggsave(p, file = file.path(outdir, paste0(prot, '_coloc_min_clst_n', min_clst_n, 'eps',epsv,'.pdf')),        width = 10, height = 10, unit = 'cm')
+
+```
+```{r}
+tmp
+```
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
