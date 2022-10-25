@@ -20,22 +20,24 @@ import time
 
 
 pl = ProcessLocalizations(
-    'Z:/siva_minflux/analysis//Single wash/Syp/220825_Syp_ROI2/220825_Syp_ROI2.npy')
+    'Z:/siva_minflux/analysis//Multiwash/ZnT3_Syp/220309_ZnT3_Syp_ROI02/220309_ZnT3_Syp_ROI02.npy')
 
-print(pl.file_path_no_ext() + 'tmp')
+
 pl.log_parameters()
 pl.trim_min_localizations()
 pl.cluster_tid(method=pl.CLS_METHOD_BAYES_GMM)
-pl.DBCLUSTER_EPS_MEAS = 2e-9
-pl.cluster_meas(method=pl.CLS_METHOD_DBSCAN)
+pl.get_split_events()
+
+#pl.DBCLUSTER_EPS_MEAS = 4e-9
+#pl.cluster_meas(method=pl.CLS_METHOD_DBSCAN)
 #pl.cluster_all(method=pl.CLS_METHOD_DBSCAN)
 #pl.cluster_all_intersect(col.CLS_ALL)
-summary_dict = pl.summary_per_tid2()
-pl.export_vtu(summary_dict, col.LTR, file_path =pl.file_path_no_ext() + 'tmp', unit=col.UNIT_UM)
-summary_dict_flt = pl.filter_summary_loc(summary_dict,  filter_cluster={'name': col.CLS_MERGED_MEAS, 'size': 3})
+#summary_dict = pl.summary_per_tid2()
+#pl.export_vtu(summary_dict, col.LTR, file_path =pl.file_path_no_ext() + 'tmp', unit=col.UNIT_UM)
+#summary_dict_flt = pl.filter_summary_loc(summary_dict,  filter_cluster={'name': col.CLS_MERGED_MEAS, 'size': 3})
 
-pl.export_vtu(summary_dict_flt, col.LTR, file_path =pl.file_path_no_ext() + '_tmp_flt_merged_meas_size3',
-              unit=col.UNIT_UM)
+#pl.export_vtu(summary_dict_flt, col.LTR, file_path =pl.file_path_no_ext() + '_tmp_flt_merged_meas_size3',
+#              unit=col.UNIT_UM)
 
 #pl.DBCLUSTER_EPS_MERGED_MEAS = 3e-8
 #pl.DBCLUSTER_EPS_MERGED_ALL = 3e-8
