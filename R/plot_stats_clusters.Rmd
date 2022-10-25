@@ -34,7 +34,8 @@ eps_all <-  c(20, 30, 40, 50, 60, 70, 80)
 epsv <-  40 # For plots
 min_clst_n <- 3 # Do not compute size for cluster with less than this number of events
 
-prot = 'ATG9'
+prot = 'VGLUT1'
+prot= 'Syp'
 mdir <- file.path('Z:/siva_minflux/analysis/Single wash', prot)
 outdir <- file.path('Z:/siva_minflux/analysis/Single wash', prot, 'figures')
 if (!dir.exists(outdir)) {
@@ -58,7 +59,6 @@ for (eps in eps_all) {
 ```{r cluster size as function of eps}
 
 eps_to_plot <- eps_all
-
 p <- ggplot()
 datasub <- subset(cls_stats_all_eps, as.logical((cls_stats_all_eps$n>=min_clst_n ) * (cls_stats_all_eps$eps %in% eps_to_plot)))
 p <- p + geom_violin(data = datasub , aes(x = factor(eps), y = PCA1_nm*2, ), draw_quantiles = c(0.25, 0.5, 0.75), width = 1)
@@ -88,12 +88,14 @@ p_longest_radius <- p + ggtitle(prot) +  annotation_logticks(sides = 'l')
 
 p_PCA1
 p_longest_radius
-save_figure(p_PCA1, prot = prot, postfix ='_diameter2', w = 10, h = 7)
+save_figure(p_PCA1, prot = prot, postfix ='_diameter', w = 10, h = 7)
 save_figure(p_longest_radius, prot = prot, postfix ='_maximal_diameter', w = 10, h = 7)
 
 
 ```
 ```{r plot specific distribution}
+epsv <- 40
+min_clst_n <- 3
 
 datasub <- subset(cls_stats_all_eps, 
                   as.logical((cls_stats_all_eps$n>=min_clst_n ) * (cls_stats_all_eps$eps == epsv)))
@@ -106,6 +108,7 @@ p <- p + geom_histogram(data = datasub,
 p <- p + xlab('cluster diameter (nm)')
 p <- p + scale_fill_discrete(name = 'dbscan radius eps (nm)')
 p <- p + ylab('fraction (%)')
+p <- p + scale_x_continuous(breaks = seq(0, 200, 30), limits = c(0, 150))
 p <- p + theme_bw()
 p <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
 p_PCA1 <- p + ggtitle(prot)
@@ -116,6 +119,7 @@ p <- ggplot()
 p <- p + geom_histogram(data = datasub, aes(x = longest_radius_nm*2, y = ..count../sum(..count..)*100), color='black', fill='gray')
 
 p <- p + xlab('cluster maximal diameter (nm)')
+p <- p + scale_x_continuous(breaks = seq(0, 200, 30), limits = c(0, 150))
 p <- p + scale_fill_discrete(name = 'dbscan radius eps (nm)')
 p <- p + ylab('fraction (%)')
 p <- p + theme_bw()
@@ -123,13 +127,15 @@ p <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_bl
 p_longest_radius <- p + ggtitle(prot)
 p_PCA1
 p_longest_radius
-save_figure(p_PCA1, prot = prot, postfix = '_diameter_eps40', w = 10, h = 7)
+save_figure(p_PCA1, prot = prot, postfix = paste0('_diameter_eps',epsv), w = 21, h = 7)
 
-save_figure(p_longest_radius, prot = prot, postfix = '_maximal_diameter_eps40', w = 10, h = 7)
+save_figure(p_longest_radius, prot = prot, postfix = paste0('_maximal_diameter_eps', epsv), 
+            w = 21, h = 7)
 
 
 
 ```
+
 
 ```{r summary statistics diameter}
 # table with some summary stats
@@ -151,7 +157,7 @@ colnames(out_all) <- c('eps', 'mean_diameter_nm', 'std_diameter',
                        'median_max_diameter_nm', '75quant_max_diameter_nm')
 rownames(out_all) <- NULL
 out_all
-write.csv(out_all, file = file.path(outdir, paste0(prot, '_cluster_diameter_stats2.csv')), row.names = FALSE)
+write.csv(out_all, file = file.path(outdir, paste0(prot, '_cluster_diameter_stats.csv')), row.names = FALSE)
 ```
 
 ```{r events cluster size}
@@ -171,7 +177,6 @@ p <- p + annotation_logticks(sides = 'l')
 p_eps <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
 
 
-epsv <-  40
 datasub <- subset(cls_stats_all_eps, 
                   as.logical((cls_stats_all_eps$eps == epsv)))
 
@@ -189,7 +194,7 @@ p_40 <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element
 p_eps
 p_40
 save_figure(p_eps, prot, '_fraction_events_per_cluster_size_dist', w = 10, h = 7 )
-save_figure(p_40, prot, '_fraction_events_per_cluster_size_dist_eps40', w = 10, h = 7 )
+save_figure(p_40, prot, paste0('_fraction_events_per_cluster_size_dist_eps', epsv), w = 10, h = 7 )
 
 
 ```
@@ -229,9 +234,31 @@ p_40
 save_figure(p_40, prot, paste0('_cluster_nearest_distance_', epsv) , w = 10, h = 7 )
 
 ```
-```{r}
-nn_all
+```{r nr cluster summary per image}
+cls_stats_all <- list()
+for (eps in eps_all) {
+  csv_files <- list.files(pattern = paste0("_eps", eps, '.csv'), recursive = TRUE, path = mdir, full.names = TRUE)
+  for (afile in csv_files){
+    cls_stats <- cluster_stats(afile, cls_type = cls_use)
+    cls_stats$eps <- eps
+    cls_stats_all <- rbind(cls_stats_all, cls_stats)
+  }
+  
+}
+
 ```
+
+```{r}
+tmp <- aggregate(cbind(numberclust = n)  ~  file + eps , data = cls_stats_all, FUN = function(x) c(largereq3 = sum(x>=3), all = sum(x>=0)))
+tmp2 <-  aggregate(dim_img_vol_m3  ~  file + eps , data = cls_stats_all, FUN = function(x) c(mean(x)))
+
+tmp <- do.call(data.frame, tmp)
+tmp$dim_img_vol_m3 <- tmp2$dim_img_vol_m3
+write.csv(x = tmp, file = file.path(outdir, paste0(prot, '_numbercluster.csv' )), row.names = FALSE)
+#aggregate(. ~ n , data = cls_stats_all, by = list('file' = file, 'eps' = eps), FUN = function(x) c(nlarger3 = #sum(x>=3), total =   sum(x>=1)))
+```
+
+
 
 
 
