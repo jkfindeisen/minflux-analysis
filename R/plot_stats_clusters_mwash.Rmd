@@ -1,0 +1,311 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library('plotly')
+library(htmlwidgets)
+library(webshot)
+
+# Edit this path accordingly to match local folder 
+setwd("T:/Antonio_Politi/Code/minflux-analysis/R/")
+source("tools_clusterstat.R")
+
+save_figure <- function(plot_fig, prot, postfix, w, h) {
+  ggsave(plot_fig, filename = file.path(outdir, paste0(prot, postfix, '.pdf')), width = w, height = h, unit = 'cm')
+  ggsave(plot_fig, filename = file.path(outdir, paste0(prot, postfix, '.png')), width = w, height = h, unit = 'cm')
+  
+}
+
+
+
+
+```
+
+```{r read files}
+# cycle through the cluster and extract some stats. Plot hist
+cls_use = col.CLS_MERGED_MEAS
+
+eps_all <-  c(20, 30, 40, 50, 60, 70, 80)
+epsv <-  40 # For plots
+min_clst_n <- 3 # Do not compute size for cluster with less than this number of events
+# 
+prot = 'VGLUT1_VGLUT1'
+mdir <- file.path('Z:/siva_minflux/analysis/Multiwash/', prot)
+outdir <- file.path('Z:/siva_minflux/analysis/Multiwash/', prot, 'figures')
+
+
+if (!dir.exists(outdir)) {
+  dir.create(outdir)
+}
+
+cls_stats_all_eps <- list()
+for (eps in eps_all) {
+  csv_files <- list.files(pattern = paste0("_eps", eps, '.csv'), recursive = TRUE, path = mdir, full.names = TRUE)
+  cls_stats_all <- cluster_stats_set(csv_files, cls_type = cls_use)
+  cls_stats_all$eps <- eps
+  cls_stats_all_eps <- rbind(cls_stats_all_eps, cls_stats_all)
+}
+
+washes <-  unique(cls_stats_all$protname)
+
+
+
+```
+
+
+```{r cluster size as function of eps and wash}
+
+eps_to_plot <- eps_all
+
+p <- ggplot()
+datasub <- subset(cls_stats_all_eps, as.logical((cls_stats_all_eps$n>=min_clst_n ) * (cls_stats_all_eps$eps %in% eps_to_plot)))
+p <- p + geom_violin(data = datasub , aes(x = factor(eps), y = PCA1_nm*2, color=protname), draw_quantiles = c(0.25, 0.5, 0.75), width = 1)
+
+p <- p + xlab('dbscan radius eps (nm)')
+p <- p + scale_y_log10()
+p <- p + ylab('cluster diameter (nm)')
+p <- p + theme_bw()
+p <- p + scale_color_discrete(name = 'Protein name')
+p <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+p_PCA1 <- p + ggtitle(prot)
+
+
+
+p <- ggplot()
+datasub <- subset(cls_stats_all_eps, as.logical((cls_stats_all_eps$n>=2) * (cls_stats_all_eps$eps %in% eps_to_plot)))
+p <- p + geom_violin(data = datasub , aes(x = factor(eps), y = longest_radius_nm*2, color = protname), 
+                     draw_quantiles = c(0.25, 0.5, 0.75), width = 1)
+
+p <- p + xlab('dbscan radius eps (nm)')
+p <- p + scale_y_log10()
+p <- p + ylab('cluster maximal diameter (nm)')
+p <- p + theme_bw()
+p <- p + scale_color_discrete(name = 'Protein name')
+p <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+p_longest_radius <- p + ggtitle(prot) +  annotation_logticks(sides = 'l')
+
+p_PCA1
+p_longest_radius
+save_figure(p_PCA1, prot = prot, postfix ='_diameter', w = 15, h = 7)
+save_figure(p_longest_radius, prot = prot, postfix ='_maximal_diameter', w = 15, h = 7)
+
+
+```
+
+
+```{r plot specific distribution}
+
+datasub <- subset(cls_stats_all_eps, 
+                  as.logical((cls_stats_all_eps$n>=min_clst_n ) * (cls_stats_all_eps$eps == epsv)))
+
+
+p <- ggplot()
+for (aprot in washes) {
+p <- p + geom_histogram(data = datasub[datasub$protname==aprot, ], 
+                        aes(x = PCA1_nm*2, 
+                            y =  ..count../sum(..count..)*100 , 
+                            fill = protname), color='black', alpha =0.5)
+}
+p <- p + xlab('cluster diameter (nm)')
+p <- p + scale_fill_discrete(breaks = washes, name = 'Protein name')
+p <- p + ylab('fraction (%)')
+p <- p + theme_bw()
+p <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+p_PCA1 <- p + ggtitle(prot)
+
+
+
+p <- ggplot()
+for (aprot in washes) {
+p <- p + geom_histogram(data =  datasub[datasub$protname==aprot, ], 
+                        aes(x = longest_radius_nm*2, 
+                            y =  ..count../sum(..count..)*100 , 
+                            fill =protname), color='black', alpha =0.5)
+}
+
+p <- p + xlab('cluster maximal diameter (nm)')
+p <- p + scale_fill_discrete(breaks = washes, name = 'Protein name')
+p <- p + ylab('fraction (%)')
+p <- p + theme_bw()
+p <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+p_longest_radius <- p + ggtitle(prot)
+p_PCA1
+p_longest_radius
+save_figure(p_PCA1, prot = prot, postfix = paste0('_diameter_eps',epsv), w = 15, h = 7)
+
+save_figure(p_longest_radius, prot = prot, postfix = paste0('_maximal_diameter_eps', epsv), 
+            w = 15, h = 7)
+
+
+
+```
+
+
+```{r summary statistics diameter}
+# table with some summary stats
+out_all <- list()
+wash = unique(cls_stats_all_eps$wash)
+for (aprot in washes) {
+  for (epsloc in eps_to_plot) {
+    
+    datasub <- subset(cls_stats_all_eps, 
+                      as.logical((cls_stats_all_eps$n>=min_clst_n ) * 
+                                   (cls_stats_all_eps$eps == epsloc) * (protname==aprot)))
+    
+    out <- c(aprot, epsloc, 
+             mean(datasub$PCA1_nm[datasub$eps == epsloc]*2),
+             sd(datasub$PCA1_nm[datasub$eps == epsloc]*2),  
+             quantile(datasub$PCA1_nm[datasub$eps == epsloc], probs = c(0.25, 0.5, 0.75))*2, 
+             mean(datasub$PCA1_nm[datasub$eps == epsloc]*2), 
+             sd(datasub$longest_radius_nm[datasub$eps == epsloc]*2),
+             quantile(datasub$longest_radius_nm[datasub$eps == epsloc], probs = c(0.25, 0.5, 0.75))*2)
+    
+    out_all <- rbind(out_all, out)}
+
+}
+colnames(out_all) <- c('protein_name',  'eps', 'mean_diameter_nm', 'std_diameter', 
+                       '25quant_diameter_nm',  
+                       'median_diameter_nm', '75quant_diameter_nm', 
+                       'mean_max_diameter_nm','std_max_diameter_nm', 
+                       '25quant_max_diameter_nm',  
+                       'median_max_diameter_nm', '75quant_max_diameter_nm')
+rownames(out_all) <- NULL
+out_all
+write.csv(out_all, file = file.path(outdir, paste0(prot, '_cluster_diameter_stats.csv')), row.names = FALSE)
+```
+
+```{r events cluster size}
+datasub <- subset(cls_stats_all_eps, as.logical( (cls_stats_all_eps$eps %in% eps_to_plot)))
+
+p <- ggplot()
+p <- p + geom_violin(data = datasub, 
+                     aes(x = factor(eps), y = n, weight = n, color = protname), draw_quantiles = c(0.25, 0.5, 0.75), width = 1)
+
+p <- p + xlab('dbscan radius eps (nm)' )
+p <- p + scale_color_discrete(breaks = washes, name = 'Protein name')
+p <- p + ylab('number of events per cluster')
+p <- p + scale_y_log10()
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p <- p + annotation_logticks(sides = 'l')
+p_eps <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+
+datasub <- subset(cls_stats_all_eps, 
+                  as.logical((cls_stats_all_eps$eps == epsv)))
+
+p <- ggplot()
+for (aprot in washes) {
+p <- p + geom_histogram(data = datasub[datasub$protname == aprot, ], aes(x = n, weight = n, 
+                                            y = ..count../sum(..count..)*100,
+                                            fill = protname), 
+                        alpha = 0.5,
+                        color='black')
+}
+p<- p + scale_x_log10()
+p <- p + xlab('number of events per cluster')
+p <- p + ylab('fraction of events in cluster (%)')
+p <- p + scale_fill_discrete(breaks = washes, name = 'Protein name')
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p <- p + annotation_logticks(sides = 'b')
+p_40 <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+p_eps
+p_40
+
+
+save_figure(p_eps, prot, '_fraction_events_per_cluster_size_dist', w = 10, h = 7 )
+save_figure(p_40, prot, paste0('_fraction_events_per_cluster_size_dist_eps', epsv), w = 10, h = 7 )
+
+
+```
+
+
+
+
+```{r neirest neighbor}
+
+csv_files <- list.files(pattern = paste0("_eps", epsv, '.csv'), recursive = TRUE, path = mdir, full.names = TRUE)
+nn_all <- data.frame()
+for (aprot in washes) {
+  for (afile in csv_files){
+    
+    data <- cluster_stats(afile, cls_type = cls_use)
+    datasub <- subset(data, n>=min_clst_n & protname == aprot)
+    m <- as.matrix(datasub[,c('centroid_x', 'centroid_y', 'centroid_z')])
+    dd <- as.matrix(dist(m))
+    nn <- seq(1, dim(dd)[1])*0
+    for (i in seq(1, dim(dd)[1])){
+      nn[i] <- sort(dd[i,])[2][[1]]*1e9
+    }
+    nn_all <- rbind(nn_all, data.frame(aprot, nn))
+  }
+    
+}
+
+p <- ggplot()
+for (aprot in washes) {
+p <- p + geom_histogram(data = nn_all[aprot  == aprot, ], 
+                        aes(x = nn, 
+                            y = ..count../sum(..count..)*100, 
+                            fill = aprot), 
+                        color='black', 
+                        alpha = 0.3)
+}
+p <- p + xlab('nearest distance between clusters')
+p <- p + ylab('fraction cluster (%)')
+p <- p + scale_fill_discrete(breaks = washes, name = 'Protein name')
+p <- p + scale_x_log10()
+p <- p + theme_bw()
+p <- p + ggtitle(prot)
+p <- p + annotation_logticks(sides = 'b')
+p_40 <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+p_40
+save_figure(p_40, prot, paste0('_cluster_nearest_distance_', epsv) , w = 15, h = 7 )
+
+```
+
+```{r nr cluster summary per image}
+# TO BE FIXED FOR MWASH!!!
+cls_stats_all <- list()
+for (eps in eps_all) {
+  csv_files <- list.files(pattern = paste0("_eps", eps, '.csv'), recursive = TRUE, path = mdir, full.names = TRUE)
+  for (afile in csv_files){
+    cls_stats <- cluster_stats(afile, cls_type = cls_use)
+    cls_stats$eps <- eps
+    cls_stats_all <- rbind(cls_stats_all, cls_stats)
+  }
+  
+}
+
+```
+
+```{r export some statistics per cluster} 
+
+# TO BE FIXED FOR MULTIWASH
+tmp <- aggregate(cbind(numberclust = n)  ~  file + eps , data = cls_stats_all, FUN = function(x) c(largereq3 = sum(x>=3), all = sum(x>=0)))
+tmp2 <-  aggregate(dim_img_vol_m3  ~  file + eps , data = cls_stats_all, FUN = function(x) c(mean(x)))
+
+tmp <- do.call(data.frame, tmp)
+tmp$dim_img_vol_m3 <- tmp2$dim_img_vol_m3
+write.csv(x = tmp, file = file.path(outdir, paste0(prot, '_numbercluster.csv' )), row.names = FALSE)
+```
+
+
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

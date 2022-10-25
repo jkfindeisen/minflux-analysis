@@ -15,26 +15,29 @@ from scipy.interpolate import interp1d
 import math
 from matplotlib import pyplot as plt
 import warnings
-from evtk import hl
-import mfxcolnames as col
+
+# User relative imports to run main
+from . import mfxcolnames as col
+import re
+
 
 class MfxData:
-    MAX_TDIFF_REF = 10    # time difference between final record of ref (beads) and mfx recording in sec.
+    # class variables, i.e. shared by all instances
+
     CORRECT_Z_POSITION_FACTOR = 0.7 # Correction due to oil water RI difference
     CORRECT_Z_POSITION_FACTOR_REF = 0.7
-
-    ref_all = {}          # stores ref beads
-    mfx_all = {}          # stores mfx measurements all washes
-    valid_ref_beads = {}  # Beads recording that fulfill minimal requirements
-    maxtime_ref_beads = {}  # Consensus max time between reference beads recording. Mfx recording is cropped accordingly
-    msrfile_path = None
-    msrfile_name = None
-    outdir = None
-    zarrdir = None
     TRANS = 'translate'
     ROT = 'rotate'
+    LOAD_ZARR_IN_MEMORY = True
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, outdir_main=None, zarr_dir_main=None):
+        # instance variables
+        self.MAX_TDIFF_REF = 10    # time difference between final record of ref (beads) and mfx recording in sec.
+        self.ref_all = {}          # stores ref beads
+        self.mfx_all = {}          # stores mfx measurements all washes
+        self.valid_ref_beads = {}  # Beads recording that fulfill minimal requirements
+        self.maxtime_ref_beads = {}  # Consensus max time between reference beads recording. Mfx recording is cropped accordingly
+        self.mintime_ref_beads = {}
         if not os.path.exists(file_path):
             raise OSError(file_path + " file does not exist!")
         self.msrfile_path = file_path
@@ -42,16 +45,23 @@ class MfxData:
         self.msrfile_name = os.path.splitext(os.path.basename(self.msrfile_path))[0]
         # These are default values that can be overwritten
 
-        self.outdir = self.get_outdir(self.msrfile_path)
-        self.zarrdir = self.get_zarrdir(self.outdir, self.msrfile_path)
+        self.outdir = self.get_outdir(self.msrfile_path, outdir_main)
+        # Local directory performs 10x faster than network connection/ Staging on a local directory may be better
+        if zarr_dir_main is None:
+            zarr_dir_main = self.outdir
+        else:
+            zarr_dir_main = self.get_outdir(self.msrfile_path, zarr_dir_main)
+        self.zarrdir = self.get_zarrdir(outdir=zarr_dir_main, msrfile=self.msrfile_path)
+        if not os.path.exists(self.outdir):
+            os.makedirs(self.outdir)
 
 
     @staticmethod
-    def get_outdir(msrfile):
-        filepath = os.path.dirname(msrfile)
+    def get_outdir(msrfile, filepath = None):
+        if filepath == None:
+            filepath = os.path.dirname(msrfile)
         filename = os.path.splitext(os.path.basename(msrfile))[0]
         # These are default values that can be overwritten
-
         return os.path.join(filepath, filename)
 
     @staticmethod
@@ -60,14 +70,12 @@ class MfxData:
         mf_data_sets = afile.minflux_data_sets()
         zarrdir = {mf['label']: os.path.join(outdir, mf['label']) for mf in mf_data_sets}
         # Sort assuming that order of acquisition is reflected in name
-        zarrdir = dict(sorted(zarrdir.items()))
+        zarrdir = dict(sorted(zarrdir.items(),  key=lambda x: int(re.search(r'\d+$', x[0]).group())))
         return zarrdir
 
-    def zarr_export(self):
+    def __zarr_export(self):
         """
-        Export mfx msr file to zarr files if data does not exist yet.
-        :param zarrdir: A dictionary containing per label the path to export the msr file
-        :param msrfile: path of msrfile
+        Exports mfx msr file to zarr files if data does not exist yet.
         :return: None
         """
         afile = specpy.File(self.msrfile_path, File.Read)
@@ -77,24 +85,28 @@ class MfxData:
 
     def zarr_import(self, force=False):
         """
-        Import zarr files located in self.zarrdir if no data has been loaded yet
-        :param zarrdir: A dictionary containing per label the path to import the msr file
-        :param msrfile: path of msrfile
+        Import zarr files located in self.zarrdir if no data has been loaded yet. Eventually create zarr data structure
         :param force: force import
         """
 
         # check that zarr files exist and eventually export
         for label, adir in self.zarrdir.items():
             if not os.path.exists(adir):
-                self.zarr_export()
+                print('Create Zarr data structure')
+                self.__zarr_export()
 
         if len(self.ref_all) == 0 or len(self.mfx_all) == 0 or force:
             for label, adir in self.zarrdir.items():
-                zarr_data = zarr.open(store=os.path.join(adir, 'zarr'), mode='r')
-                self.ref_all[label] = zarr_data.grd.mbm
-                self.mfx_all[label] = zarr_data.mfx
-
-
+                dir_store1 = zarr.DirectoryStore(os.path.join(adir, 'zarr'))
+                # dirr_store1.rename(src_dir=..., dst_dir=...) to change name of directory
+                cache1 = zarr.LRUStoreCache(store=dir_store1, max_size=2**28)
+                if self.LOAD_ZARR_IN_MEMORY:
+                    # Does not seem to make a difference in speed
+                    self.ref_all[label] = zarr.load(store=cache1, path='grd/mbm/')
+                    self.mfx_all[label] = zarr.load(store=cache1, path='mfx')
+                else:
+                    self.ref_all[label] = zarr.open(store=cache1, mode='r',  path='grd/mbm/')
+                    self.mfx_all[label] = zarr.open(store=cache1, mode='r', path='mfx')
 
     def set_valid_ref(self, force=False):
         """
@@ -102,10 +114,9 @@ class MfxData:
         internal variable will be set in this function
         :param force: force import
         """
-        # TODO When unequal number of references find consensus
-        self.zarr_import()
+        # TODO: Create a match beads functionality if names are different
         valid_ref_beads = {}
-        if force or len(self.valid_ref_beads) > 0:
+        if not force and len(self.valid_ref_beads) > 0:
             return
         for label in self.ref_all:
             ref = self.ref_all[label]
@@ -123,6 +134,7 @@ class MfxData:
             valid_ref_beads[label] = vld
         # Match the beads in the different washes
         keys = list(valid_ref_beads)
+
         vld_ref_all = valid_ref_beads[keys[0]]
         for i in range(1, len(keys)):
             vld_ref_all = [x for x in vld_ref_all if x in valid_ref_beads[keys[i]]]
@@ -132,7 +144,9 @@ class MfxData:
         """
         Extract the positions of valid beads, concatenate those for all directories
         :return: a list with time_vector, pos_array of all beads, std in time in case there is a jump in the recording
+        pos_array[time, bead, axes]
         """
+        # TODO: Add dynamic time warping to match correctly the different recordings from all beads.
         self.set_valid_ref()
         pos_array = []
         time_vector = []
@@ -147,9 +161,11 @@ class MfxData:
             else:
                 n_el = n_el[0]
             # Average time through the measurements of each round
+            # Rough find time shift between
             time_stack = np.stack([self.ref_all[label][b][col.TIM][:n_el] for b in self.valid_ref_beads], axis=1)
             time_mean = np.mean(time_stack, axis=1)
             self.maxtime_ref_beads[label] = time_mean[-1] # CONSISTENCY!
+            self.mintime_ref_beads[label] = time_mean[0]
             time_vector.append(time_mean)
             time_std_vector.append(np.std(time_stack, axis=1))
             pos_array.append(np.stack([self.ref_all[label][b][col.POS][:n_el] for b in self.valid_ref_beads], axis=1))
@@ -164,17 +180,23 @@ class MfxData:
         pos_array[:, :, 2] = pos_array[:, :, 2]*self.CORRECT_Z_POSITION_FACTOR_REF
         return [time_vector, pos_array, time_std_vector]
 
-    def compute_ref_transform_error(self, pos_array):
+    def compute_pos_error(self, pos_array):
         """
         Some metrics to asses how stable the beads are
         :param pos_array:
         :return: the metric
         """
-        # Compute error in bead position now just std
+        # Compute error in bead position, this is the mean in all directions. This is the best fit of a symmetric gaussian
+        # Alternatively one could compute the norm, which is the highest possible error!
+        # The standard error is truly the error of the centroid ??
 
-        std = [np.std(pos_array[:, :, ax], axis=0) for ax in [0, 1, 2]]
-        return {'ste': np.mean(np.linalg.norm(std, axis=1)) / math.sqrt(len(std)),
-                'std': np.mean(np.linalg.norm(std, axis=1))}
+        std = [np.std(pos_array[:, :, ax], axis=0) for ax in range(0, 3)]
+        std_m = np.mean(std, axis=1)
+        # std[axis_dimension, bead_id]
+        return {'se_xy': np.sqrt((std_m[0]**2 + std_m[1]**2)/2)/ math.sqrt(np.shape(std)[1]),
+                'se_z': std_m[2]/math.sqrt(np.shape(std)[1]),
+                'std_xy': np.sqrt((std_m[0]**2 + std_m[1]**2)/2),
+                'std_z': std_m[2]}
 
     def get_ref_transform(self):
         """
@@ -221,6 +243,13 @@ class MfxData:
         pos_array_reg = self.apply_ref_rotate(rotate, pos_array_reg.copy(), time_vector)
         return pos_array_reg
 
+    def ref_transform_error(self, translate):
+        [time_vector, pos_array, time_std_vector] = self.get_ref()
+        pos_array_translate = np.zeros_like(pos_array)
+        for idx in range(0, pos_array.shape[1]):
+            pos_array_translate[:, idx] = self.apply_ref_translate(translate, pos_array[:, idx],time_vector)
+        return self.compute_pos_error(pos_array_translate)
+
     def show_ref_transform(self, translate, rotate, show=False, save=False):
         if not save and not show:
             return
@@ -234,7 +263,10 @@ class MfxData:
             if rotate is not None:
                 pos_array_translate_rotate[:, idx] = self.apply_ref_transform(translate, rotate, pos_array[:, idx],
                                                                               time_vector)
-        titles = ['Unregistered, std (nm) %.2f, se (nm) %.2f\n', 'Translate, std (nm) %.2f, se (nm) %.2f\n', 'Translate + rotate, std (nm) %.2f, se (nm) %.2f\n']
+        titles = ['Unregistered (nm), std_xy %.2f, std_z  %.2f\nse_xy %.2f, se_z %.2f\n',
+                  'Translate, std_xy %.2f, std_z  %.2f\nse_xy %.2f, se_z %.2f\n',
+                  'Translate + rotate, std_xy %.2f, std_z  %.2f\nse_xy %.2f, se_z %.2f\n']
+
         if rotate is None:
             obj_to_plot = [pos_array, pos_array_translate]
         else:
@@ -248,15 +280,18 @@ class MfxData:
             for idx in range(pos_array.shape[1]):
                 for iobj in range(len(obj_to_plot)):
                     ax[iobj].plot(time_vector, obj_to_plot[iobj][:, idx, ax_idx] -
-                                 obj_to_plot[iobj][0, idx, ax_idx], label=self.valid_ref_beads[idx])
+                                  obj_to_plot[iobj][0, idx, ax_idx], label=self.valid_ref_beads[idx])
             ax[0].legend(fontsize=8)
             ax[0].set_ylabel(labels[ax_idx])
 
 
-        ref_error = [self.compute_ref_transform_error(obj) for obj in obj_to_plot]
+        ref_error = [self.compute_pos_error(obj) for obj in obj_to_plot]
         for iobj in range(len(obj_to_plot)):
-            axs[0][iobj].set_title(titles[iobj] % (ref_error[iobj]['std'] * math.pow(10, 9),
-                                                   ref_error[iobj]['ste'] * math.pow(10, 9)), fontsize=8)
+            axs[0][iobj].set_title(titles[iobj] % (ref_error[iobj]['std_xy'] * math.pow(10, 9),
+                                                   ref_error[iobj]['std_z'] * math.pow(10, 9),
+                                                   ref_error[iobj]['se_xy'] * math.pow(10, 9),
+                                                   ref_error[iobj]['se_z'] * math.pow(10, 9)
+                                                   ), fontsize=8)
             axs[2][iobj].set_xlabel('time (sec)')
         if save:
             plt.savefig(os.path.join(self.outdir, self.msrfile_name + "_ref_drift.png"))
@@ -274,27 +309,33 @@ class MfxData:
             lnc_nv = obj[col.ITR][col.LNC][~obj[col.VLD]]
             lnc_nv = lnc_nv[:, -1]
             print("Localizations in invalid tracks %s %d/%d" % (label, len(lnc_nv[~np.isnan(lnc_nv[:, 0]), 0]),
-                                                                       len(lnc_nv[np.isnan(lnc_nv[:,0]), 0])))
+                                                                len(lnc_nv[np.isnan(lnc_nv[:,0]), 0])))
             lnc = obj[col.ITR][col.LNC][obj[col.VLD]]
             loc = obj[col.ITR][col.LOC][obj[col.VLD]]
             tim = obj[col.TIM][obj[col.VLD]]
             tid = obj[col.TID][obj[col.VLD]]
             vld = obj[col.VLD][obj[col.VLD]]
+            eco = obj[col.ITR][col.ECO][obj[col.VLD]]
+            efo = obj[col.ITR][col.EFO][obj[col.VLD]]
             # further trim for time ref_beads
-            tim_trim = tim < self.maxtime_ref_beads[label]
+            tim_trim = (tim > self.mintime_ref_beads[label]) * (tim < self.maxtime_ref_beads[label])
             lnc = lnc[tim_trim]
             loc = loc[tim_trim]
             tim = tim[tim_trim]
             tid = tid[tim_trim]
             vld = vld[tim_trim]
+            eco = eco[tim_trim]
+            efo = efo[tim_trim]
             # Keep only last iteration
             lnc = lnc[:, -1]
             loc = loc[:, -1]
+            eco = eco[:, -1]
+            efo = efo[:, -1]
             lnc[:, 2] = lnc[:, 2]*self.CORRECT_Z_POSITION_FACTOR
             loc[:, 2] = loc[:, 2]*self.CORRECT_Z_POSITION_FACTOR
             tim_tid_mean = self.get_meantime_trackid(tid, tim)
             out_dic[label] = {col.TIM: tim, col.TIM_TID_MEAN: tim_tid_mean, col.TID: tid, col.LNC: lnc,
-                              col.LOC: loc, col.VLD: vld}
+                              col.LOC: loc, col.VLD: vld, col.ECO: eco, col.EFO: efo}
         # Add time
         add_time = 0
         add_tid = 0
@@ -322,6 +363,7 @@ class MfxData:
                 out_dic[label][col.LRE] = self.apply_ref_transform(register[self.TRANS], register[self.ROT],
                                                                    out_dic[label][col.LNC],
                                                                    out_dic[label][col.TIM_TID_MEAN])
+        out_dic['ref_error'] = self.ref_transform_error(register[self.TRANS])
         return out_dic
 
     def get_meantime_trackid(self, tid, tim):
@@ -354,40 +396,7 @@ class MfxData:
         flat_pos2 = np.reshape(pos_array2, (pos_array2.shape[0]*pos_array2.shape[1], pos_array2.shape[2]))
 
         out_dict = {col.TIM: time_vector, col.LNC: flat_pos2, col.LTR: flat_pos_trans, col.LRE: flat_pos_reg}
-        scipy.io.savemat(os.path.join(self.outdir, self.msrfile_name + "_ref.mat"), out_dict)
+        np.save(os.path.join(self.outdir, self.msrfile_name + "_ref.npy"), out_dict)
 
-    def export_vtu(self, out_dict, lcoord, file_path):
-        # export to vtk format for view in paraview, ideally also clustering etc.
 
-        pos_concat = np.concatenate([out_dict[d][lcoord] for d in out_dict])
-        tid_concat = np.concatenate([out_dict[d][col.TID] for d in out_dict])
-        tim_concat = np.concatenate([out_dict[d][col.TIM] for d in out_dict])
-        # concatenate positions
-        x = np.ascontiguousarray(pos_concat[:, 0], dtype = np.float64)
-        y = np.ascontiguousarray(pos_concat[:, 1], dtype = np.float64)
-        z = np.ascontiguousarray(pos_concat[:, 2], dtype = np.float64)
-        r = np.random.uniform(0, 1, x.shape[0]) # This needs to be computed
-        keys = list(out_dict.keys())
-        p = np.repeat(range(1, len(keys)+1), [out_dict[k][lcoord].shape[0] for k in keys])
-        hl.pointsToVTK(file_path, x, y, z, data={'P': p, col.TID: tid_concat, col.TIM:  tim_concat,
-                                                 'radius': r})
 
-if __name__ == "__main__":
-    mfx = MfxData("C:/Users/apoliti/Desktop/mfluxtest/data/220309_VGlut_paint_2nM_3DMINFLUX_16p_PH0_6_05b.msr")
-    # different default output
-    mfx.outdir = os.path.join("C:/Users/apoliti/Desktop/mfluxtest/analysis", mfx.msrfile_name)
-    mfx.zarrdir = mfx.get_zarrdir(mfx.outdir, mfx.msrfile_path)
-
-    mfx.zarr_import()
-    mfx.set_valid_ref()
-
-    regis = mfx.get_ref_transform()
-    out_dic = mfx.align_to_ref()
-    mfx.export_vtu(out_dic, col.LOC, "C:/Users/apoliti/Desktop/TMP/points_loc")
-    mfx.export_vtu(out_dic, col.LTR, "C:/Users/apoliti/Desktop/TMP/points_ltr")
-    mfx.export_vtu(out_dic, col.LRE, "C:/Users/apoliti/Desktop/TMP/points_lre")
-
-    mfx.export_numpy(out_dic)
-    #mfx.export_mat(out_dic)
-    #mfx.export_ref_mat()
-    #mfx.show_ref_transform(regis[mfx.TRANS], regis[mfx.ROT], save=True, show=False)

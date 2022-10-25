@@ -84,13 +84,16 @@ Impsector comes with python libraries for the handling of the files.
 specpy is located at `C:\Imspector\Versions\IDOFIMSPECTORVERSION\python\PythonVersion-NumpyVersion`
 e.g. `C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\Python3.9.2-NumPy1.20.1`
 create environment with appropriate python version
-`conda create -n imspector-env python=3.9.2
+
+```
+conda create -n imspector-env python=3.9.2
 conda activate imspector
 cd C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\Python3.9.2-NumPy1.20.1
-pip install specpy-1.2.3-cp39-cp39-win_amd64.whl`
+pip install specpy-1.2.3-cp39-cp39-win_amd64.whl
+```
 
 
-load a msr 
+## load a msr 
 `file=specpy.File("name.msr")` 
 list the contained Minflux data sets (see dir() for the respective functions, they should be recognizable by name). 
 Then, use unpack() to extract the data as a zarr to disk. 
@@ -103,4 +106,66 @@ You access the bead positions via the Zarr archive in the data directory (usuall
 while the measurement is open in Imspector. Within the archive structure, their localization data 
 is stored at /grd/mbm/R<nn>.
 
+
+# Python install instructions
+Install conda or miniconda (https://docs.conda.io/en/latest/miniconda.html). Start anaconda prompt and install in the base environment
+
+```
+conda install -c conda-forge jupyter
+conda install -c conda-forge ipython
+conda install -c conda-forge ipykernel
+``` 
+
+
+
+Create a working environment. Replace `my-env` with the name of your environment.
+
+```
+conda create -n my-env python=3.9 
+conda activate my-env
+```
+
+Tools for the data processing
+
+```
+conda install -c conda-forge scikit-learn 
+conda install -c conda-forge numpy
+conda install -c conda-forge matplotlib
+conda install pandas
+```
+
+Imspector specific package
+
+```
+cd C:\Imspector\Versions\16.3.15620-m2205-win64-MINFLUX_BASE\python\Python3.9.2-NumPy1.20.1
+pip install specpy-1.2.3-cp39-cp39-win_amd64.whl
+```
+
+Zarr data handling
+```
+conda install -c conda-forge zarr
+```
+
+VTK stuff
+```
+conda install -c conda-forge vtk
+conda install -c conda-forge pyevtk
+```
+
+Jupyter embedding
+```
+conda install ipykernel
+```
+
+Go to the directory containing the code. Start a anacondo prompt and 
+```
+jupyter notebook
+```
+
+# Number of photons
+R.S. email:
+`` For the first localization of a trace, you need the combined number of the “phtLimit” parameters (of all iterations of your sequence) as a lower limit for total detected photons. After the first localization succeeded, additional localizations require only as much photons as needed for iterations from “headstart” on to the final one.``
+
+the parameter 'phtLimit' and 'headstart' can be found in the zarr directory 'mfx/.zattrs'. 
+The 'headstart' is negative? The 'phtLimit' appears several time in the metadata with different values. 
 
