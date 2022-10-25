@@ -27,7 +27,7 @@ class ProcessLocalizations:
 
         # Some instance variables that may change depending on sample, ...
         self.MIN_LOCALIZATIONS = 3
-        self.FACT_SPLIT_LOCALIZATIONS = 2         # Perform analysis and split eventually localizations with more than  self.FACT_SPLIT_LOCATIONS*self.MIN_LOCALIZATIONS
+        self.FACT_SPLIT_LOCALIZATIONS = 2     # Perform analysis and split eventually localizations with more than  self.FACT_SPLIT_LOCATIONS*self.MIN_LOCALIZATIONS
         self.DBCLUSTER_SIZE = 3               # minimal size of cluster for localizations ~ at least MIN_LOCALIZATIONS
         self.DBCLUSTER_EPS_TRACK = 2e-8       # 1e-8 = 10 nm, eps for clustering localization of a single track
         self.DBCLUSTER_EPS_MEAS = 2e-8        # dbscan eps for clustering localizations in each measurement
@@ -124,8 +124,22 @@ class ProcessLocalizations:
         var_all = self.get_var()
         std_all = np.sqrt(np.mean(var_all, axis=1))
         return {'mean': np.mean(std_all), 'quantiles': np.quantile(std_all, quantiles)}
+    
+    def get_split_events(self):
+        keys = list(self.loc.keys())
+        tid_splits = dict(zip(keys, [list()]*len(keys)))
+        for label in self.loc:
+            tids = []
+            uid = np.unique(self.loc[label][col.TID])
+            for idx in uid:
+                tid_idxs = (self.loc[label][col.TID] == idx)
+                uid_cls_track = np.unique(self.loc[label][col.CLS_TRACK][tid_idxs])
+                if len(uid_cls_track) > 1:
+                   tids.append([idx, sum(tid_idxs)])
+            tid_splits[label] = tids
+        return tid_splits
 
-    def cluster_tid(self, method):
+    def cluster_tid(self, method, coord=col.LTR, weight_prior = 1/3):
         # Cluster each track individually using heuristic of MIN_SPLIT_LOCALIZATIONS and
         # Large cluster bigger than upper certain value
         # Check if efo is not large than 2*median
@@ -135,13 +149,12 @@ class ProcessLocalizations:
         log_msg = ''
         for label in self.loc:
             efo_upper_limit = np.quantile(self.loc[label][col.EFO], [0.5])*2 # Twice higher than median, more than one fluorophore
-
             processed = 0
-            uid, idxs, counts = np.unique(self.loc[label][col.TID2], return_index=True, return_counts=True)
+            uid, counts = np.unique(self.loc[label][col.TID], return_counts=True)
             # compute some stats, will be used to choose whether to process the track or not
-            for i, idx in enumerate(idxs):
-                tid_idxs = range(idx, idx+counts[i])
-                sd = np.sqrt(np.mean(np.var(self.loc[label][col.LTR][tid_idxs], axis=0)))
+            for i, uid_idx in enumerate(uid):
+                tid_idxs = (self.loc[label][col.TID] == uid_idx)
+                sd = np.sqrt(np.mean(np.var(self.loc[label][coord][tid_idxs], axis=0)))
 
                 if counts[i] < self.FACT_SPLIT_LOCALIZATIONS*self.MIN_LOCALIZATIONS or sd < std_all['quantiles'][0]:
                     self.loc[label][col.CLS_TRACK][tid_idxs] = 0
@@ -149,7 +162,7 @@ class ProcessLocalizations:
 
                 processed += 1
                 if method == self.CLS_METHOD_DBSCAN:
-                    predict = self.dbscan(self.loc[label][col.LTR][tid_idxs],
+                    predict = self.dbscan(self.loc[label][coord][tid_idxs],
                                           eps=self.DBCLUSTER_EPS_TRACK)
                     u_cls = np.unique(predict)
                     if len(u_cls) > 1:
@@ -159,14 +172,15 @@ class ProcessLocalizations:
                     self.loc[label][col.CLS_TRACK][tid_idxs] = predict
                     self.set_tid2()
                 if method == self.CLS_METHOD_GMM:
-                    self.loc[label][col.CLS_TRACK][tid_idxs] = self.gmm(self.loc[label][col.LTR][tid_idxs])
+                    self.loc[label][col.CLS_TRACK][tid_idxs] = self.gmm(self.loc[label][coord][tid_idxs])
                     predict = self.filter_cls_efo(predict, efo=self.loc[label][col.EFO][tid_idxs],
                                                   efo_upper_limit=efo_upper_limit)
                     self.loc[label][col.CLS_TRACK][tid_idxs] = predict
                     self.set_tid2()
                 if method == self.CLS_METHOD_BAYES_GMM:
-                    predict = self.bayes_gmm(self.loc[label][col.LTR][tid_idxs],
-                                             std_limit=std_all['quantiles'][0])
+                    predict = self.bayes_gmm(self.loc[label][coord][tid_idxs],
+                                             std_limit=std_all['quantiles'][0],
+                                             weight_prior=weight_prior)
                     predict = self.filter_cls_efo(predict, efo=self.loc[label][col.EFO][tid_idxs],
                                                   efo_upper_limit=efo_upper_limit)
                     self.loc[label][col.CLS_TRACK][tid_idxs] = predict
@@ -286,8 +300,6 @@ class ProcessLocalizations:
             log_msg += 'TID2 %d/%d = %.2f\n' % (len(tid2_intersect[idx]), len(tid2_total[idx]), len(tid2_intersect[idx])/len(tid2_total[idx]))
         self.logger.info(log_msg)
 
-
-
     def inter_cluster_cleanup(self, column_cls):
         # Loop through the data set and perform a majority voting
         # Each track can only belong to one cluster
@@ -348,14 +360,16 @@ class ProcessLocalizations:
                 best_alg = alg
         return best_alg.predict(x)
 
-    def bayes_gmm(self, x, std_limit=0, efo = None, efo_upper_limit = None):
+    def bayes_gmm(self, x, std_limit=0, weight_prior=1/3):
         x = x*1e9 # rescale in nm to simplify the fit
         std_limit=std_limit*1e9
         gmm = mixture.BayesianGaussianMixture(n_components=self.GMM_MAX_COMPONENTS,
                                               covariance_type=self.GMM_COVARIANCE_TYPE,
-                                              n_init=self.GMM_N_INIT)
+                                              n_init=self.GMM_N_INIT,
+                                              weight_concentration_prior=weight_prior)
         ff = gmm.fit(x)
         pr = gmm.predict(x)
+
 
         if len(np.unique(pr)) == 1 or std_limit == 0:
             return pr
@@ -462,6 +476,55 @@ class ProcessLocalizations:
             else:
                 df.to_csv(file_path + '.csv', mode='a', index=False, header=False)
 
+    def export_raw_vtu(self, in_dict, coord, file_path, unit=col.UNIT_M):
+        # TODO: Filter by cluster size. Typically clusters of size <2 are singletons
+        print('export paraview file')
+        # export one single file
+        export_column = [col.TID2, col.TIM]
+        # export one file per wash
+
+        if unit == col.UNIT_M:
+            factor_unit = 1
+        if unit == col.UNIT_UM:
+            factor_unit = 1e6
+        if unit == col.UNIT_NM:
+            factor_unit = 1e9
+
+        label_idx = 0
+        for label in in_dict:
+            label_idx += 1
+            # concatenate positions
+            pos_concat = np.array(in_dict[label][coord])*factor_unit
+            x = np.ascontiguousarray(pos_concat[:, 0], dtype=np.float64)
+            y = np.ascontiguousarray(pos_concat[:, 1], dtype=np.float64)
+            z = np.ascontiguousarray(pos_concat[:, 2], dtype=np.float64)
+            pview_dict = {}
+            for column in export_column:
+                if column == col.SE:
+                    pview_dict[column] = np.array(in_dict[label][column])*factor_unit
+                else:
+                    pview_dict[column] = np.array(in_dict[label][column])
+
+            pview_dict['wash'] = np.repeat(label_idx, len(in_dict[label][coord]))
+            hl.pointsToVTK(file_path + '_' + coord + '_' + label, x, y, z,
+                           data=pview_dict)
+        if len(in_dict) > 1:
+            # concatenate all washes
+            # export to vtk format for view in paraview, ideally also clustering etc.
+            pos = np.concatenate([in_dict[d][coord] for d in in_dict])*factor_unit
+            x = np.ascontiguousarray(pos[:, 0], dtype=np.float64)
+            y = np.ascontiguousarray(pos[:, 1], dtype=np.float64)
+            z = np.ascontiguousarray(pos[:, 2], dtype=np.float64)
+            pview_dict = {}
+            for column in export_column:
+                if column == col.SE:
+                    pview_dict[column] = np.array([in_dict[d][column] for d in in_dict])*factor_unit
+                else:
+                    pview_dict[column] = np.concatenate([in_dict[d][column] for d in in_dict])
+            keys = list(in_dict.keys())
+            pview_dict['wash'] = np.repeat(range(1, len(keys)+1), [len(in_dict[k][coord]) for k in keys])
+            hl.pointsToVTK(file_path + '_' + coord, x, y, z, data=pview_dict)
+
     def export_vtu(self, in_dict, coord, file_path, unit=col.UNIT_M):
         # TODO: Filter by cluster size. Typically clusters of size <2 are singletons
         print('export paraview file')
@@ -507,7 +570,7 @@ class ProcessLocalizations:
             pview_dict = {}
             for column in export_column:
                 if column == col.SE:
-                    pview_dict[column] = np.array([in_dict[d][column] for d in in_dict])*factor_unit
+                    pview_dict[column] = np.concatenate([in_dict[d][column] for d in in_dict])*factor_unit
                 else:
                     pview_dict[column] = np.concatenate([in_dict[d][column] for d in in_dict])
             keys = list(in_dict.keys())
