@@ -143,7 +143,7 @@ Use the provided yml file and install all the needed packages
   
 ```
 conda env create -f mfx.yml
-``
+```
   
 Install imspector specific package
 
