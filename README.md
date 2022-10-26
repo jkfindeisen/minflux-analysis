@@ -112,10 +112,15 @@ Install conda or miniconda (https://docs.conda.io/en/latest/miniconda.html). Sta
 
 ```
 conda install -c conda-forge jupyter
-conda install -c conda-forge ipython
-conda install -c conda-forge ipykernel
+conda install -c conda-forge nb_conda_kernels
 ``` 
+The second package is to get see the different conda environments in jupyter automatically. 
 
+otherwise you need to do 
+```
+conda activate myenv
+python -m ipykernel install --user --name myenv --display-name "Python (myenv)"
+```
 
 
 Create a working environment. Replace `my-env` with the name of your environment.
