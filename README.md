@@ -161,6 +161,14 @@ Jupyter embedding
 conda install ipykernel
 ```
 
+Finally install the python package in an editable version (still alpha). Go to the directory of this repo `python` type
+
+```
+pip install -e mfx
+```
+
+Any new update of the package will be taken into account and be accessible. 
+
 # Start the software
 Start a anaconda prompt. Make sure you are in the base environment. Eventually do ``` conda deactivate``` to get out of another environment. 
 Go to the directory containing the code. Start a anacondo prompt and type
