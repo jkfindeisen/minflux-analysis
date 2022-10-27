@@ -166,6 +166,7 @@ Tools for the data processing
 ```
 conda install -c conda-forge scikit-learn 
 conda install -c conda-forge matplotlib
+conda install -c conda-forge plotly
 conda install -c conda-forge pandas
 ```
 
