@@ -203,7 +203,7 @@ Any new update of the package will be taken into account and be accessible.
 
 # Start the software
 Start a anaconda prompt. Make sure you are in the base environment. Eventually do ``` conda deactivate``` to get out of another environment. 
-Go to the directory containing the code. Start a anacondo prompt and type
+Go to the directory containing the code. Start a anaconda prompt and type
 
 ```
 jupyter notebook
