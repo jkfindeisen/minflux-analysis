@@ -1,6 +1,6 @@
 name: base
 channels:
-  - defaults
+  - conda-forge
 dependencies:
   - conda
   - python=3.9
