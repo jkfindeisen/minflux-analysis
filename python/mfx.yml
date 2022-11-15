@@ -1,13 +1,13 @@
 name: mfx
 channels:
-  - defaults
+  - conda-forge
 dependencies:
   - python=3.9
   - scikit-learn
   - matplotlib
   - pandas
+  - plotly
   - zarr
   - vtk
   - pyevtk
   - ipykernel
-prefix: C:\Users\apoliti\.conda\envs\mfx

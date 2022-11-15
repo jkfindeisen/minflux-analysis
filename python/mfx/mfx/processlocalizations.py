@@ -362,7 +362,7 @@ class ProcessLocalizations:
 
     def bayes_gmm(self, x, std_limit=0, weight_prior=1/3):
         x = x*1e9 # rescale in nm to simplify the fit
-        std_limit=std_limit*1e9
+        std_limit = std_limit*1e9
         gmm = mixture.BayesianGaussianMixture(n_components=self.GMM_MAX_COMPONENTS,
                                               covariance_type=self.GMM_COVARIANCE_TYPE,
                                               n_init=self.GMM_N_INIT,
@@ -370,14 +370,13 @@ class ProcessLocalizations:
         ff = gmm.fit(x)
         pr = gmm.predict(x)
 
-
         if len(np.unique(pr)) == 1 or std_limit == 0:
             return pr
 
         u_cls, idx_cls, counts_cls = np.unique(pr, return_index=True, return_counts=True)
         # find the entry
         id_max = np.argsort(counts_cls)
-        d = np.linalg.norm(gmm.means_[1] - gmm.means_[0]) # distance between centers
+        d = np.linalg.norm(gmm.means_[1] - gmm.means_[0])  # distance between centers
         if d < std_limit:
             # Merge if clouds are too close
             pr[:] = 0
