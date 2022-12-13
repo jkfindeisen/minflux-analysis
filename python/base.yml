@@ -1,0 +1,12 @@
+name: base
+channels:
+  - conda-forge
+dependencies:
+  - conda
+  - python=3.9
+  - menuinst
+  - console_shortcut
+  - powershell_shortcut
+  - jupyter
+  - nb_conda_kernels
+prefix: C:\ProgramData\Miniconda3

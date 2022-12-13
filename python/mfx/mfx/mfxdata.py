@@ -115,6 +115,7 @@ class MfxData:
         :param force: force import
         """
         # TODO: Create a match beads functionality if names are different
+        # TODO: Allow for cropping beginning of experiment (first wash)
         valid_ref_beads = {}
         if not force and len(self.valid_ref_beads) > 0:
             return
